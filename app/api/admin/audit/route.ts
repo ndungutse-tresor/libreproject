@@ -82,27 +82,32 @@ async function restoreProfile(client: PoolClient, event: JsonRecord): Promise<Re
 
   const { rows } = await client.query(
     `SELECT id::text, name, email, role, perms, account_type, writer_status,
-            reading_seconds, premium_until
+            reading_seconds, premium_until, gender, age, bio, favorite_genres
      FROM profiles WHERE id = $1 FOR UPDATE`,
     [event.entity_id]
   )
   const current = rows[0]
-  if (!current || current.role === 'super' || !sameState(current, after)) {
+  const stateFields = Object.keys(after).filter((field) => field !== 'password_hash')
+  const currentState = current && Object.fromEntries(stateFields.map((field) => [field, current[field]]))
+  if (!current || current.role === 'super' || !sameState(currentState, after)) {
     throw new RestoreConflict('This account has changed since that history entry. Refresh history and review the latest changes.')
   }
 
-  const fields = [
+  const allowedFields = new Set([
     'name', 'email', 'role', 'perms', 'account_type', 'writer_status',
-    'reading_seconds', 'premium_until'
-  ] as const
-  const assignments = fields.map((field, index) => `${field} = $${index + 2}`)
+    'reading_seconds', 'premium_until', 'gender', 'age', 'bio', 'favorite_genres'
+  ])
+  const fields = Object.keys(before).filter((field) => field !== 'id' && allowedFields.has(field))
+  const assignments = fields.map((field, index) => `${field} = $${index + 2}${field === 'perms' || field === 'favorite_genres' ? '::text[]' : ''}`)
   const values = fields.map((field) => before[field] ?? null)
   await client.query(
     `UPDATE profiles SET ${assignments.join(', ')} WHERE id = $1`,
     [event.entity_id, ...values]
   )
 
-  return { beforeState: current as JsonRecord, afterState: before, targetName: String(event.target_name) }
+  const restoredState = Object.fromEntries(Object.keys(before).map((field) => [field, field === 'id' ? String(event.entity_id) : before[field]]))
+  const previousState = Object.fromEntries(stateFields.map((field) => [field, current[field]]))
+  return { beforeState: previousState, afterState: restoredState, targetName: String(event.target_name) }
 }
 
 async function restorePaymentSetting(client: PoolClient, event: JsonRecord): Promise<RestoredState> {

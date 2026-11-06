@@ -14,7 +14,13 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS account_type text NOT NULL DEFAULT 'reader',
-  ADD COLUMN IF NOT EXISTS writer_status text NOT NULL DEFAULT 'disabled';
+  ADD COLUMN IF NOT EXISTS writer_status text NOT NULL DEFAULT 'disabled',
+  ADD COLUMN IF NOT EXISTS gender text,
+  ADD COLUMN IF NOT EXISTS age smallint,
+  ADD COLUMN IF NOT EXISTS bio text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS favorite_genres text[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS profile_image_data bytea,
+  ADD COLUMN IF NOT EXISTS profile_image_mime_type text;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_account_type_check') THEN
@@ -22,6 +28,20 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_writer_status_check') THEN
     ALTER TABLE profiles ADD CONSTRAINT profiles_writer_status_check CHECK (writer_status IN ('disabled', 'pending', 'approved'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_gender_check') THEN
+    ALTER TABLE profiles ADD CONSTRAINT profiles_gender_check CHECK (gender IS NULL OR gender IN ('male', 'female', 'prefer_not_to_say'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_age_check') THEN
+    ALTER TABLE profiles ADD CONSTRAINT profiles_age_check CHECK (age IS NULL OR age BETWEEN 1 AND 120);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_profile_image_mime_check') THEN
+    ALTER TABLE profiles ADD CONSTRAINT profiles_profile_image_mime_check
+      CHECK (profile_image_mime_type IS NULL OR profile_image_mime_type IN ('image/jpeg', 'image/png', 'image/webp'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_profile_image_pair_check') THEN
+    ALTER TABLE profiles ADD CONSTRAINT profiles_profile_image_pair_check
+      CHECK ((profile_image_data IS NULL) = (profile_image_mime_type IS NULL));
   END IF;
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_email_lower_unique ON profiles (lower(email));

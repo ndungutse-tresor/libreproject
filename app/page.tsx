@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import ProfileQuickLink from './components/ProfileQuickLink'
 
 export default function HomePage() {
   return (
@@ -9,6 +10,7 @@ export default function HomePage() {
           <div className="landing-nav-links">
             <Link className="landing-nav-optional" href="/library">Library</Link>
             <Link className="landing-nav-optional" href="/pricing">Pricing</Link>
+            <ProfileQuickLink />
             <Link href="/login">Log in</Link>
             <Link className="landing-nav-cta" href="/signup">Join Libra</Link>
           </div>

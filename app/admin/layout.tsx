@@ -3,6 +3,7 @@ import { getPool } from '@/lib/db'
 import { getSessionUserId } from '@/lib/session'
 import AdminSignOut from '../components/AdminSignOut'
 import AdminNavigation from '../components/AdminNavigation'
+import ProfileQuickLink from '../components/ProfileQuickLink'
 
 type AdminProfile = {
   name: string
@@ -94,6 +95,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <strong>Admin workspace</strong>
           </div>
           <div className="admin-account">
+            <ProfileQuickLink />
             <div className="admin-avatar" aria-hidden="true">{profile.name.trim().slice(0, 1).toUpperCase()}</div>
             <div className="admin-account-copy"><strong>{profile.name}</strong><span>{isSuper ? 'Super administrator' : 'Administrator'}</span></div>
             <AdminSignOut />

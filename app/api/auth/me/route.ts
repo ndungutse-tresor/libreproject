@@ -10,7 +10,9 @@ export async function GET() {
 
   try {
     const { rows } = await getPool().query(
-      'SELECT id, name, email, role, perms, reading_seconds, premium_until, account_type, writer_status FROM profiles WHERE id = $1',
+      `SELECT id, name, email, role, perms, reading_seconds, premium_until, account_type, writer_status,
+              gender, age, bio, favorite_genres, profile_image_data IS NOT NULL AS has_profile_image
+       FROM profiles WHERE id = $1`,
       [userId]
     )
     return NextResponse.json({ user: rows[0] ?? null })

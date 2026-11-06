@@ -1,6 +1,7 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
+import ProfileQuickLink from './ProfileQuickLink'
 
 export default function ReturnButton() {
   const pathname = usePathname()
@@ -24,6 +25,7 @@ export default function ReturnButton() {
       <button className="return-button" type="button" onClick={goBack}>
         <span aria-hidden="true">←</span> Return
       </button>
+      <ProfileQuickLink />
     </div>
   )
 }
