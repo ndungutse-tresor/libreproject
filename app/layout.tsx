@@ -1,4 +1,5 @@
 import './globals.css'
+import ReturnButton from './components/ReturnButton'
 
 export const metadata = {
   title: 'Libra',
@@ -8,7 +9,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ReturnButton />
+        {children}
+      </body>
     </html>
   )
 }

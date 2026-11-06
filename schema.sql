@@ -1,4 +1,4 @@
--- Run this once against the Neon database from the Render Shell or Neon SQL Editor.
+-- Apply against the Neon database from the Render Shell or Neon SQL Editor.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -12,7 +12,39 @@ CREATE TABLE IF NOT EXISTS profiles (
   premium_until timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS account_type text NOT NULL DEFAULT 'reader',
+  ADD COLUMN IF NOT EXISTS writer_status text NOT NULL DEFAULT 'disabled';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_account_type_check') THEN
+    ALTER TABLE profiles ADD CONSTRAINT profiles_account_type_check CHECK (account_type IN ('reader', 'writer'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_writer_status_check') THEN
+    ALTER TABLE profiles ADD CONSTRAINT profiles_writer_status_check CHECK (writer_status IN ('disabled', 'pending', 'approved'));
+  END IF;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_email_lower_unique ON profiles (lower(email));
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  actor_id uuid REFERENCES profiles(id) ON DELETE SET NULL,
+  actor_name text NOT NULL,
+  actor_email text NOT NULL,
+  action text NOT NULL,
+  entity_type text NOT NULL CHECK (entity_type IN ('profile', 'payment_setting', 'submission')),
+  entity_id text NOT NULL,
+  target_name text NOT NULL,
+  summary text NOT NULL,
+  before_state jsonb,
+  after_state jsonb,
+  can_restore boolean NOT NULL DEFAULT false,
+  restored_at timestamptz,
+  related_event_id bigint REFERENCES admin_audit_log(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS admin_audit_log_created_idx ON admin_audit_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS admin_audit_log_entity_idx ON admin_audit_log (entity_type, entity_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS books (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -24,6 +56,51 @@ CREATE TABLE IF NOT EXISTS books (
   is_published boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE books
+  ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES profiles(id);
+
+CREATE TABLE IF NOT EXISTS content_submissions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  creator_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  kind text NOT NULL CHECK (kind IN ('book', 'meme', 'quote')),
+  title text NOT NULL,
+  author text,
+  attribution text,
+  body text,
+  file_name text,
+  mime_type text,
+  file_data bytea,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  reviewed_by uuid REFERENCES profiles(id),
+  reviewed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (
+    (kind = 'book' AND file_name IS NOT NULL AND mime_type IS NOT NULL AND file_data IS NOT NULL)
+    OR (kind = 'meme' AND (file_data IS NOT NULL OR NULLIF(btrim(body), '') IS NOT NULL))
+    OR (kind = 'quote' AND NULLIF(btrim(body), '') IS NOT NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS content_submissions_status_created_idx ON content_submissions (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS content_submissions_creator_created_idx ON content_submissions (creator_id, created_at DESC);
+
+ALTER TABLE books
+  ADD COLUMN IF NOT EXISTS source_submission_id uuid REFERENCES content_submissions(id);
+CREATE UNIQUE INDEX IF NOT EXISTS books_source_submission_unique ON books (source_submission_id) WHERE source_submission_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS content_posts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind text NOT NULL CHECK (kind IN ('meme', 'quote')),
+  title text NOT NULL,
+  body text NOT NULL,
+  attribution text,
+  source_submission_id uuid NOT NULL UNIQUE REFERENCES content_submissions(id),
+  created_by uuid NOT NULL REFERENCES profiles(id),
+  is_published boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS content_posts_published_created_idx ON content_posts (is_published, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS book_pages (
   book_id bigint NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -108,8 +185,15 @@ INSERT INTO payment_methods (key, label, provider, enabled) VALUES
   ('momo', 'MTN MoMo', 'flutterwave', false)
 ON CONFLICT (key) DO NOTHING;
 
-INSERT INTO plans (kind, name, minutes, price_usd) VALUES
-  ('time', '30 minutes', 30, 2),
-  ('time', '2 hours', 120, 5),
-  ('time', '10 hours', 600, 15),
-  ('premium', 'Premium (1 month)', NULL, 9.99);
+INSERT INTO plans (kind, name, minutes, price_usd)
+SELECT 'time', '30 minutes', 30, 2
+WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = '30 minutes');
+INSERT INTO plans (kind, name, minutes, price_usd)
+SELECT 'time', '2 hours', 120, 5
+WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = '2 hours');
+INSERT INTO plans (kind, name, minutes, price_usd)
+SELECT 'time', '10 hours', 600, 15
+WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = '10 hours');
+INSERT INTO plans (kind, name, minutes, duration_days, price_usd)
+SELECT 'premium', 'Premium (1 month)', NULL, 30, 9.99
+WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Premium (1 month)');

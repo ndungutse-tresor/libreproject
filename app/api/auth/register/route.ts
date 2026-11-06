@@ -11,15 +11,22 @@ export async function POST(request: Request) {
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
     const password = typeof body.password === 'string' ? body.password : ''
+    const accountType = body.accountType === 'writer' ? 'writer' : body.accountType === 'reader' ? 'reader' : ''
 
-    if (!name || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 8) {
-      return NextResponse.json({ error: 'Enter a name, valid email, and password of at least 8 characters.' }, { status: 400 })
+    if (!name || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 8 || !accountType) {
+      return NextResponse.json({ error: 'Enter a name, valid email, password of at least 8 characters, and choose Reader or Writer.' }, { status: 400 })
+    }
+
+    if (email === process.env.ADMIN_EMAIL?.trim().toLowerCase()) {
+      return NextResponse.json({ error: 'This email is reserved for the administrator account.' }, { status: 409 })
     }
 
     const passwordHash = await bcrypt.hash(password, 12)
     const { rows } = await getPool().query(
-      'INSERT INTO profiles (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, role',
-      [name, email, passwordHash]
+      `INSERT INTO profiles (name, email, password_hash, account_type, writer_status)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, email, role, perms, account_type, writer_status`,
+      [name, email, passwordHash, accountType, accountType === 'writer' ? 'pending' : 'disabled']
     )
     await createSession(rows[0].id)
     return NextResponse.json({ user: rows[0] }, { status: 201 })

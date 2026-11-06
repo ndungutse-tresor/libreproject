@@ -40,7 +40,6 @@ export default function BookReader({ bookId, title, pageCount }: { bookId: numbe
     <main style={{ maxWidth: 860, margin: '0 auto', padding: 32 }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <Link href="/library" style={{ color: '#1d4ed8', textDecoration: 'none' }}>← Library</Link>
           <h1 style={{ margin: '8px 0 0' }}>{title}</h1>
         </div>
         <span style={{ background: '#e2e8f0', borderRadius: 999, padding: '8px 12px' }}>Page {pageNumber} of {pageCount}</span>
