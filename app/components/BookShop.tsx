@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import BookCover from './gallery/BookCover'
 import LibraHeader from './gallery/LibraHeader'
+import { Drawer } from './gallery/Drawer'
 import { formatPrice, useCurrency, usePricing, type Plan } from './gallery/pricing'
 import './gallery/gallery.css'
 
@@ -59,6 +60,7 @@ export default function BookShop({ book }: { book: ShopBook }) {
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [bagOpen, setBagOpen] = useState(false)
 
   // Lets the gallery's flying artwork know the page image is in place.
   useEffect(() => { window.dispatchEvent(new Event('gs:arrived')) }, [])
@@ -225,12 +227,6 @@ export default function BookShop({ book }: { book: ShopBook }) {
               </div>
             </div>
 
-            {book.kind === 'sample' && access !== 'free' && <div className="gs-option">
-              <label className="gs-option-label" htmlFor="coupon">Coupon: <span>optional</span></label>
-              <div className="gs-chips">
-                <input id="coupon" className="gs-chip" style={{ width: 180, textAlign: 'left', cursor: 'text' }} value={coupon} onChange={(event) => setCoupon(event.target.value)} placeholder="CODE" autoComplete="off" />
-              </div>
-            </div>}
           </div>
 
           <div className="gs-buy">
@@ -240,15 +236,41 @@ export default function BookShop({ book }: { book: ShopBook }) {
                 : <a className="gs-cta" href={fileUrl} download>Download {formatLabel(book.mimeType)}</a>
               : access === 'free'
                 ? <Link className="gs-cta" href={readerHref}>Start reading</Link>
-                : <button type="button" className="gs-cta" disabled={!plan || !cardAvailable || busy} onClick={() => void checkout()}>
-                  {busy ? 'Starting checkout…' : !plan ? 'Choose a plan' : !cardAvailable ? 'Card payments unavailable' : `Buy ${planLength(plan)} · ${formatPrice(Number(plan.price_usd), currency)}`}
+                : <button type="button" className="gs-cta" disabled={!plan || !cardAvailable} onClick={() => { setError(''); setBagOpen(true) }}>
+                  {!plan ? 'Choose a plan' : !cardAvailable ? 'Card payments unavailable' : `Add to order · ${formatPrice(Number(plan.price_usd), currency)}`}
                 </button>}
           </div>
 
-          {error && <p className="gs-error" role="alert">{error} {/sign in/i.test(error) && <Link href="/login">Log in</Link>}</p>}
           {book.kind === 'sample' && access !== 'free' && <p className="gs-fine">Secure card checkout by Stripe. Time is added to your account as soon as the payment clears.</p>}
         </div>
       </article>
+
+      {bagOpen && plan && book.kind === 'sample' && <Drawer
+        title="Your order"
+        onClose={() => setBagOpen(false)}
+        footer={(close) => <>
+          <p className="gs-total"><span>Total</span><span>{formatPrice(Number(plan.price_usd), currency)}</span></p>
+          <button type="button" className="gs-cta" disabled={!cardAvailable || busy} onClick={() => void checkout()}>
+            {busy ? 'Starting checkout…' : 'Checkout'}
+          </button>
+          <button type="button" className="gs-cta is-light" onClick={close}>Keep browsing</button>
+        </>}
+      >
+        <div className="gs-line-item">
+          <span className="gs-line-thumb"><BookCover title={book.title} author={book.author} /></span>
+          <div>
+            <p className="gs-line-title">{planLength(plan)}{access === 'premium' ? ' of Premium' : ' of reading time'}</p>
+            <p className="gs-line-meta">Bought from {book.title}. Use it on any locked page in the library. Paid in {currency?.code ?? 'USD'}.</p>
+          </div>
+          <span className="gs-line-price">{formatPrice(Number(plan.price_usd), currency)}</span>
+        </div>
+        <div className="gs-option" style={{ marginTop: 28 }}>
+          <label className="gs-option-label" htmlFor="coupon">Coupon: <span>optional, applied at checkout</span></label>
+          <input id="coupon" className="gs-chip" style={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left', cursor: 'text' }} value={coupon} onChange={(event) => setCoupon(event.target.value)} placeholder="Code" autoComplete="off" />
+        </div>
+        {error && <p className="gs-error" role="alert">{error} {/sign in/i.test(error) && <Link href="/login">Log in</Link>}</p>}
+        <p className="gs-fine">Secure card checkout by Stripe. Time is added to your account as soon as the payment clears.</p>
+      </Drawer>}
     </main>
   )
 }

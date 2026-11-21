@@ -8,8 +8,10 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Gallery pages: apply the remembered night view before the first paint. */}
+        <script dangerouslySetInnerHTML={{ __html: "try{if(localStorage.getItem('libra.theme')==='night')document.documentElement.dataset.gsTheme='night'}catch(e){}" }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link

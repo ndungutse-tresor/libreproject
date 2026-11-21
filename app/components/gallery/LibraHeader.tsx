@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { useCurrency, usePricing } from './pricing'
+import { ThemeToggle } from './theme'
 
 type Props = {
   search?: string
@@ -53,8 +54,8 @@ export default function LibraHeader({ search, onSearch }: Props) {
       <div className="gs-header-left">
         <Link href="/" className="gs-mark" aria-label="Libra home">
           <svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true">
-            <path d="M1 2.5c3.4-1.6 6.6-1.6 9.5 0V15C7.6 13.4 4.4 13.4 1 15Z" fill="#111" />
-            <path d="M21 2.5c-3.4-1.6-6.6-1.6-9.5 0V15c2.9-1.6 6.1-1.6 9.5 0Z" fill="#111" />
+            <path d="M1 2.5c3.4-1.6 6.6-1.6 9.5 0V15C7.6 13.4 4.4 13.4 1 15Z" fill="currentColor" />
+            <path d="M21 2.5c-3.4-1.6-6.6-1.6-9.5 0V15c2.9-1.6 6.1-1.6 9.5 0Z" fill="currentColor" />
           </svg>
           libra.
         </Link>
@@ -73,9 +74,10 @@ export default function LibraHeader({ search, onSearch }: Props) {
         {currencies.length > 1 && <select className="gs-select" aria-label="Currency" value={currency} onChange={(event) => setCurrency(event.target.value)}>
           {currencies.map((item) => <option key={item.code} value={item.code}>{item.code}</option>)}
         </select>}
+        <ThemeToggle storageKey="libra.theme" />
         {profile
           ? <Link className="gs-icon-link" href="/profile" aria-label="Your profile">
-            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="3" fill="none" stroke="#111" strokeWidth="1.3" /><path d="M2 15c.6-3.2 3-5 6-5s5.4 1.8 6 5" fill="none" stroke="#111" strokeWidth="1.3" /></svg>
+            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" strokeWidth="1.3" /><path d="M2 15c.6-3.2 3-5 6-5s5.4 1.8 6 5" fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>
             <span>{profile.name.split(' ')[0]}</span>
           </Link>
           : profile === null && <Link className="gs-icon-link" href="/login">Log in</Link>}

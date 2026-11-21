@@ -32,6 +32,8 @@ type Props = {
   /** Remembers the wall position (per tab) so returning from a detail page lands where the visitor left. */
   storageKey?: string
   hint?: string
+  /** Shown under a piece once it has been brought forward. */
+  focusHint?: string
 }
 
 type Point = { x: number; z: number; s: number }
@@ -148,11 +150,14 @@ function roomPaths(g: Geometry) {
   }
 }
 
+type Rect = { x: number; y: number; w: number; h: number }
+type Box = { left: number; top: number; width: number; height: number }
+
 /**
  * Where the detail page draws its main image (see .gs-product / .gs-media-frame),
- * so the clicked work can fly straight into place before the page arrives.
+ * so the chosen work can glide straight into place before the page arrives.
  */
-function detailFrame(aspect: number) {
+function detailFrame(aspect: number): Rect {
   const width = window.innerWidth
   const height = window.innerHeight
   if (width <= 900) {
@@ -168,22 +173,54 @@ function detailFrame(aspect: number) {
   return { x: left + column - w, y: 84, w, h }
 }
 
-/** A flat copy of the artwork that travels from the wall to the detail page's image slot. */
-function flyToDetail(art: HTMLElement, aspect: number) {
-  const from = art.getBoundingClientRect()
-  const to = detailFrame(aspect)
-  const ghost = document.createElement('div')
+/** Where a piece sits when it is brought forward: centred and large, with its caption beneath. */
+function focusFrame(stage: Box, aspect: number): Rect {
+  const narrow = stage.width < 700
+  let h = stage.height * (narrow ? 0.5 : 0.62)
+  let w = h * aspect
+  const maxWidth = stage.width * (narrow ? 0.78 : 0.5)
+  if (w > maxWidth) { w = maxWidth; h = w / aspect }
+  return { x: stage.left + (stage.width - w) / 2, y: stage.top + stage.height * 0.46 - h / 2, w, h }
+}
+
+function place(element: HTMLElement, r: Rect) {
+  Object.assign(element.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` })
+}
+
+/** A transform that makes an element laid out at `to` appear exactly over `from`. */
+function mapOnto(from: Box, to: Rect) {
+  return `translate(${from.left - to.x}px, ${from.top - to.y}px) scale(${from.width / to.w}, ${from.height / to.h})`
+}
+
+/** A flat copy of the artwork, lifted off the wall. It lives on <body> so it can outlast the page. */
+function makeGhost(art: HTMLElement, item: WallItem, frame: Rect, hint: string) {
+  const ghost = document.createElement('button')
+  ghost.type = 'button'
   ghost.className = 'gw-ghost'
-  ghost.setAttribute('aria-hidden', 'true')
+  ghost.setAttribute('aria-label', item.label)
   ghost.appendChild(art.cloneNode(true))
-  Object.assign(ghost.style, { left: `${to.x}px`, top: `${to.y}px`, width: `${to.w}px`, height: `${to.h}px` })
-  ghost.style.transform = `translate(${from.left - to.x}px, ${from.top - to.y}px) scale(${from.width / to.w}, ${from.height / to.h})`
-  document.body.appendChild(ghost)
-  ghost.getBoundingClientRect()
-  requestAnimationFrame(() => {
-    ghost.classList.add('is-flying')
-    ghost.style.transform = 'none'
-  })
+  const caption = document.createElement('span')
+  caption.className = 'gw-ghost-cap'
+  if (item.caption) {
+    const first = document.createElement('span')
+    first.textContent = item.caption[0]
+    caption.appendChild(first)
+    if (item.caption[1]) {
+      const second = document.createElement('em')
+      second.textContent = item.caption[1]
+      caption.appendChild(second)
+    }
+  }
+  const note = document.createElement('small')
+  note.textContent = hint
+  caption.appendChild(note)
+  ghost.appendChild(caption)
+  place(ghost, frame)
+  return ghost
+}
+
+/** Keeps the ghost over the detail page's image until the page says it has drawn it. */
+function handOff(ghost: HTMLElement) {
   let removed = false
   const remove = () => {
     if (removed) return
@@ -192,15 +229,25 @@ function flyToDetail(art: HTMLElement, aspect: number) {
     ghost.classList.add('is-done')
     window.setTimeout(() => ghost.remove(), 260)
   }
-  // The detail page announces itself once its image is on screen.
-  const arrive = () => window.setTimeout(remove, 120)
+  const arrive = () => window.setTimeout(remove, 160)
   window.addEventListener('gs:arrived', arrive)
   window.setTimeout(remove, 5000)
 }
 
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/** Ignores the click that the browser sends at the end of a drag or a dismissing tap. */
+function swallowNextClick() {
+  const swallow = (click: MouseEvent) => { click.stopPropagation(); click.preventDefault() }
+  window.addEventListener('click', swallow, { capture: true, once: true })
+  window.setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0)
+}
+
+type Focus = { index: number; item: WallItem; element: HTMLButtonElement; ghost: HTMLButtonElement; from: Box; frame: Rect }
+
 type Placed = { item: WallItem; key: string; copy: number; width: number; height: number; s: number }
 
-export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll or drag to walk the wall' }: Props) {
+export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll or drag to walk the wall', focusHint = 'Click to view · Scroll to step back' }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [geometry, setGeometry] = useState<Geometry | null>(null)
@@ -208,11 +255,41 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
 
   const motion = useRef({ offset: 0, target: 0, opening: false, restored: false })
   const drag = useRef<{ x: number; target: number; moved: boolean; lastX: number; lastT: number; velocity: number } | null>(null)
+  const focusRef = useRef<Focus | null>(null)
+
+  /** Sends a brought-forward piece back to its place on the wall. */
+  const unfocus = useCallback((restoreFocus = false) => {
+    const f = focusRef.current
+    if (!f) return
+    focusRef.current = null
+    f.ghost.classList.remove('is-focused', 'is-lifting')
+    f.ghost.classList.add('is-returning')
+    f.ghost.style.transform = mapOnto(f.from, f.frame)
+    stageRef.current?.classList.remove('is-focused')
+    window.setTimeout(() => {
+      f.element.classList.remove('is-lifted')
+      f.ghost.remove()
+      if (restoreFocus) f.element.focus({ preventScroll: true })
+    }, 540)
+  }, [])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && focusRef.current) unfocus(document.activeElement === focusRef.current.ghost)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      const f = focusRef.current
+      if (f) f.ghost.remove()
+    }
+  }, [unfocus])
 
   useEffect(() => {
     const stage = stageRef.current
     if (!stage) return
     const measure = () => {
+      if (focusRef.current) unfocus()
       const rect = stage.getBoundingClientRect()
       if (rect.width > 0 && rect.height > 0) setGeometry(buildGeometry(rect.width, rect.height))
     }
@@ -220,7 +297,7 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
     const observer = new ResizeObserver(measure)
     observer.observe(stage)
     return () => observer.disconnect()
-  }, [])
+  }, [unfocus])
 
   const placed = useMemo(() => {
     if (!geometry || items.length === 0) return { list: [] as Placed[], total: 1 }
@@ -312,12 +389,13 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       if (motion.current.opening) return
+      if (focusRef.current) { unfocus(); return }
       const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1
       motion.current.target += (event.deltaY + event.deltaX) * scale * 1.25
     }
     stage.addEventListener('wheel', onWheel, { passive: false })
     return () => stage.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [unfocus])
 
   const nearestTarget = (s: number) => {
     const { total } = placed
@@ -325,30 +403,73 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
     return s + Math.round((current - s) / total) * total
   }
 
-  const open = (index: number) => {
+  const remember = () => {
+    if (!storageKey) return
+    try { window.sessionStorage.setItem(storageKey, String(motion.current.target)) } catch { /* ignore */ }
+  }
+
+  /** Second step: the brought-forward piece glides into the detail page's image slot. */
+  const openFocused = () => {
+    const f = focusRef.current
+    const stage = stageRef.current
+    if (!f || !stage || motion.current.opening) return
+    focusRef.current = null
+    motion.current.opening = true
+    remember()
+    const { ghost } = f
+    ghost.classList.remove('is-focused', 'is-lifting')
+    ghost.style.transform = 'none'
+    ghost.classList.add('is-moving')
+    ghost.blur()
+    place(ghost, detailFrame(f.item.aspect))
+    stage.classList.remove('is-focused')
+    stage.classList.add('is-leaving')
+    handOff(ghost)
+    window.setTimeout(() => onOpen(f.item), 600)
+  }
+
+  /** First step: the camera leans in and the piece comes forward to the middle of the room. */
+  const focusOn = (index: number) => {
     const entry = placed.list[index]
     const element = itemRefs.current[index]
     const stage = stageRef.current
-    if (!entry || !element || !stage || motion.current.opening) return
-    motion.current.opening = true
-    if (storageKey) {
-      try { window.sessionStorage.setItem(storageKey, String(motion.current.target)) } catch { /* ignore */ }
-    }
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const art = element?.querySelector<HTMLElement>('.gw-art')
+    if (!entry || !element || !stage || !art || motion.current.opening || focusRef.current) return
+    if (reducedMotion()) {
+      motion.current.opening = true
+      remember()
       onOpen(entry.item)
       return
     }
-    const art = element.querySelector('.gw-art')
-    if (art) flyToDetail(art as HTMLElement, entry.item.aspect)
-    const rect = element.getBoundingClientRect()
+    motion.current.target = motion.current.offset
+    const from = art.getBoundingClientRect()
     const box = stage.getBoundingClientRect()
-    stage.style.setProperty('--gw-origin', `${rect.left + rect.width / 2 - box.left}px ${rect.top + rect.height / 2 - box.top}px`)
-    stage.classList.add('is-leaving')
-    window.setTimeout(() => onOpen(entry.item), 560)
+    const frame = focusFrame(box, entry.item.aspect)
+    const touch = window.matchMedia('(pointer: coarse)').matches
+    const ghost = makeGhost(art, entry.item, frame, touch ? 'Tap to view · Tap the room to step back' : focusHint)
+    ghost.style.transform = mapOnto(from, frame)
+    ghost.addEventListener('click', openFocused)
+    document.body.appendChild(ghost)
+    ghost.getBoundingClientRect()
+    element.classList.add('is-lifted')
+    stage.style.setProperty('--gw-origin', `${from.left + from.width / 2 - box.left}px ${from.top + from.height / 2 - box.top}px`)
+    stage.classList.add('is-focused')
+    focusRef.current = { index, item: entry.item, element, ghost, from, frame }
+    requestAnimationFrame(() => {
+      ghost.classList.add('is-lifting', 'is-focused')
+      ghost.style.transform = 'none'
+    })
+    window.setTimeout(() => { if (focusRef.current?.ghost === ghost) ghost.focus({ preventScroll: true }) }, 320)
   }
 
   const onPointerDown = (event: React.PointerEvent) => {
     if (event.button !== 0 || motion.current.opening) return
+    if (focusRef.current) {
+      // Touching the room while a piece is forward steps back out.
+      unfocus()
+      swallowNextClick()
+      return
+    }
     drag.current = { x: event.clientX, target: motion.current.target, moved: false, lastX: event.clientX, lastT: performance.now(), velocity: 0 }
   }
 
@@ -379,15 +500,13 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
       motion.current.target -= d.velocity * 2.6 * 260
       setDragging(false)
       if (stageRef.current?.hasPointerCapture(event.pointerId)) stageRef.current.releasePointerCapture(event.pointerId)
-      // Swallow the click that follows a drag.
-      const swallow = (click: MouseEvent) => { click.stopPropagation(); click.preventDefault() }
-      window.addEventListener('click', swallow, { capture: true, once: true })
-      window.setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0)
+      swallowNextClick()
     }
   }
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (motion.current.opening) return
+    if (focusRef.current && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) unfocus()
     if (event.key === 'ArrowRight') { motion.current.target += step; event.preventDefault() }
     if (event.key === 'ArrowLeft') { motion.current.target -= step; event.preventDefault() }
   }
@@ -409,21 +528,21 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
         {geometry && paths && <svg className="gw-room" viewBox={`0 0 ${geometry.width} ${geometry.height}`} aria-hidden="true">
           <defs>
             <linearGradient id="gw-wall" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#f6f6f5" /><stop offset="0.6" stopColor="#f1f1f0" /><stop offset="1" stopColor="#eaeae9" />
+              <stop offset="0" style={{ stopColor: 'var(--gw-wall-a)' }} /><stop offset="0.6" style={{ stopColor: 'var(--gw-wall-b)' }} /><stop offset="1" style={{ stopColor: 'var(--gw-wall-c)' }} />
             </linearGradient>
             <linearGradient id="gw-ceiling" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#fbfbfa" /><stop offset="1" stopColor="#fdfdfc" />
+              <stop offset="0" style={{ stopColor: 'var(--gw-ceiling-a)' }} /><stop offset="1" style={{ stopColor: 'var(--gw-ceiling-b)' }} />
             </linearGradient>
             <linearGradient id="gw-floor" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#dfdfde" /><stop offset="1" stopColor="#ececeb" />
+              <stop offset="0" style={{ stopColor: 'var(--gw-floor-a)' }} /><stop offset="1" style={{ stopColor: 'var(--gw-floor-b)' }} />
             </linearGradient>
             <filter id="gw-soft" x="-5%" y="-50%" width="110%" height="200%"><feGaussianBlur stdDeviation="6" /></filter>
           </defs>
           <rect width={geometry.width} height={geometry.height} fill="url(#gw-wall)" />
           <path d={paths.ceilingFill} fill="url(#gw-ceiling)" />
           <path d={paths.floorFill} fill="url(#gw-floor)" />
-          <path d={paths.floor} fill="none" stroke="rgba(0,0,0,0.09)" strokeWidth="10" filter="url(#gw-soft)" />
-          <path d={paths.ceiling} fill="none" stroke="rgba(0,0,0,0.035)" strokeWidth="14" filter="url(#gw-soft)" />
+          <path d={paths.floor} fill="none" style={{ stroke: 'var(--gw-floor-line)' }} strokeWidth="10" filter="url(#gw-soft)" />
+          <path d={paths.ceiling} fill="none" style={{ stroke: 'var(--gw-ceiling-line)' }} strokeWidth="14" filter="url(#gw-soft)" />
         </svg>}
         {geometry && <div className="gw-scene" style={{ perspective: `${geometry.f}px`, perspectiveOrigin: `50% ${geometry.horizon}px` }}>
           <div className="gw-anchor" style={{ top: geometry.horizon }}>
@@ -437,10 +556,10 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
                 aria-label={entry.item.label}
                 aria-hidden={entry.copy > 0 || undefined}
                 tabIndex={entry.copy > 0 ? -1 : 0}
-                onFocus={() => { if (!motion.current.opening && !drag.current) motion.current.target = nearestTarget(entry.s) }}
+                onFocus={() => { if (!motion.current.opening && !drag.current && !focusRef.current) motion.current.target = nearestTarget(entry.s) }}
                 onClick={() => {
                   if (entry.item.kind === 'placard') motion.current.target = nearestTarget(entry.s)
-                  else open(index)
+                  else focusOn(index)
                 }}
               >
                 <span className="gw-art">{entry.item.content}</span>
