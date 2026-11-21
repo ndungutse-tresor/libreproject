@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { books as sampleBooks, collections, type Collection } from '../libra-data'
+import { collectionOrder, collections, type Collection } from '../libra-collections'
 import GalleryWall, { type WallItem } from './gallery/GalleryWall'
 import BookCover from './gallery/BookCover'
 import LibraHeader from './gallery/LibraHeader'
@@ -35,6 +35,9 @@ type LibraryResult = {
 
 type View = 'gallery' | 'list'
 
+/** What the library needs to know about a sample book; the page text stays on the server. */
+export type SampleShelfBook = { id: number; title: string; author: string; collection: Collection; year: string | null; pageCount: number }
+
 type Shelf = {
   key: string
   title: string
@@ -48,7 +51,7 @@ function formatTag(mimeType: string) {
   return mimeType === 'application/pdf' ? 'PDF' : mimeType === 'application/epub+zip' ? 'EPUB' : 'TEXT'
 }
 
-export default function LibraryCatalog() {
+export default function LibraryCatalog({ samples }: { samples: SampleShelfBook[] }) {
   const router = useRouter()
   const [published, setPublished] = useState<LibraryResult>({ books: [], posts: [] })
   const [error, setError] = useState('')
@@ -89,9 +92,9 @@ export default function LibraryCatalog() {
       key: collection,
       title: collections[collection].title,
       blurb: collections[collection].blurb,
-      books: sampleBooks
+      books: samples
         .filter((book) => book.collection === collection && matches(book.title, book.author))
-        .map((book) => ({ id: String(book.id), title: book.title, author: book.author, detail: book.year ?? `${book.pages.length} pages` }))
+        .map((book) => ({ id: String(book.id), title: book.title, author: book.author, detail: book.year ?? `${book.pageCount} pages` }))
     })
     const community: Shelf = {
       key: 'community',
@@ -101,8 +104,8 @@ export default function LibraryCatalog() {
         .filter((book) => matches(book.title, book.author ?? ''))
         .map((book) => ({ id: communityRouteId(book.id), title: book.title, author: book.author ?? 'Libra writer', detail: formatTag(book.mime_type), tag: formatTag(book.mime_type) }))
     }
-    return [fromSamples('favourites'), fromSamples('classics'), community].filter((shelf) => shelf.books.length > 0)
-  }, [published.books, search])
+    return [...collectionOrder.map(fromSamples), community].filter((shelf) => shelf.books.length > 0)
+  }, [published.books, search, samples])
 
   const wallItems = useMemo<WallItem[]>(() => shelves.flatMap((shelf) => [
     {

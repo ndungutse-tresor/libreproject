@@ -146,7 +146,7 @@ export default function BookShop({ book }: { book: ShopBook }) {
 
           <p className="gs-note">
             {book.kind === 'sample'
-              ? 'Reading time only counts down while a locked page is open, and pauses when you close the book. Premium removes every limit.'
+              ? `A Libra summary: the book’s key ideas in ${book.pageCount} short pages, not the full text. Reading time only counts down while a locked page is open, and pauses when you close the book. Premium removes every limit.`
               : 'Community books are free to read. Writers share them through the Libra writer studio.'}
           </p>
 

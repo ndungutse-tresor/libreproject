@@ -1,4 +1,6 @@
-export type Collection = 'favourites' | 'classics'
+import { summaryBooks } from './libra-summaries'
+import type { Collection } from './libra-collections'
+
 
 export type Book = {
   id: number
@@ -12,10 +14,7 @@ export type Book = {
   pages: string[]
 }
 
-export const collections: Record<Collection, { title: string; blurb: string }> = {
-  favourites: { title: 'Reader favourites', blurb: 'Books our readers return to, picked by the Libra team.' },
-  classics: { title: 'The classics', blurb: 'Public-domain books, summarised page by page for a first read.' }
-}
+export { collections, collectionOrder, type Collection } from './libra-collections'
 
 export const books: Book[] = [
   {
@@ -230,7 +229,8 @@ export const books: Book[] = [
       'Holmes often appears to solve a case at once, but he explains each step of his reasoning to Watson afterwards.',
       'Through it all, Watson records the cases, and their friendship becomes the heart of the stories.'
     ]
-  }
+  },
+  ...summaryBooks
 ]
 
 export const pricing = [
