@@ -7,8 +7,10 @@ export default function ReturnButton() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // The library gallery and book pages carry their own header.
-  if (pathname === '/' || pathname.startsWith('/admin') || pathname === '/library' || pathname.startsWith('/book/')) return null
+  // Only the account pages use this bar; the library, book, reader, plans and
+  // not-found pages carry their own header.
+  const withBar = ['/login', '/signup', '/profile', '/writer']
+  if (!withBar.includes(pathname)) return null
 
   function goBack() {
     const referrer = document.referrer

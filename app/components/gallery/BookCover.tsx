@@ -93,7 +93,8 @@ export default function BookCover({ title, author, tag }: { title: string; autho
   const lines = wrap(title, title.length > 24 ? 11 : 10)
   const longest = Math.max(1, ...lines.map((line) => line.length))
   // Long single words shrink so they stay inside the cover, whatever font is available.
-  const size = Math.min(lines.length > 2 ? 21 : 25, 168 / (longest * 0.62))
+  // Leave room for the small tag in the top corner when there is one.
+  const size = Math.min(lines.length > 2 ? 21 : 25, (tag ? 140 : 168) / (longest * 0.72))
   const id = `cover-grain-${seed}`
 
   return (

@@ -3,11 +3,14 @@ import { notFound } from 'next/navigation'
 import { books, collections } from '../../libra-data'
 import BookShop, { type ShopBook } from '../../components/BookShop'
 import { getPool } from '@/lib/db'
+import { communityRouteId, parseBookRoute } from '../../book-routes'
 
 type Params = { params: Promise<{ bookId: string }> }
 
 const findBook = cache(async (bookId: string): Promise<ShopBook | null> => {
-  const sample = books.find((entry) => entry.id === Number(bookId))
+  const route = parseBookRoute(bookId, (id) => books.some((entry) => entry.id === id))
+  if (!route) return null
+  const sample = route.kind === 'sample' ? books.find((entry) => entry.id === Number(route.id)) : undefined
   if (sample) {
     return {
       kind: 'sample',
@@ -23,20 +26,20 @@ const findBook = cache(async (bookId: string): Promise<ShopBook | null> => {
     }
   }
 
-  if (!/^\d+$/.test(bookId)) return null
   try {
     const { rows } = await getPool().query(
       `SELECT books.id::text AS id, books.title, books.author, books.description, books.language, submissions.mime_type
        FROM books
        JOIN content_submissions AS submissions ON submissions.id = books.source_submission_id
        WHERE books.id = $1 AND books.is_published = true`,
-      [bookId]
+      [route.id]
     )
     const book = rows[0]
     if (!book) return null
     return {
       kind: 'community',
-      id: book.id,
+      id: communityRouteId(book.id),
+      fileId: book.id,
       title: book.title,
       author: book.author ?? 'Libra writer',
       year: null,

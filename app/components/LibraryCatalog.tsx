@@ -7,6 +7,7 @@ import { books as sampleBooks, collections, type Collection } from '../libra-dat
 import GalleryWall, { type WallItem } from './gallery/GalleryWall'
 import BookCover from './gallery/BookCover'
 import LibraHeader from './gallery/LibraHeader'
+import { communityRouteId } from '../book-routes'
 import './gallery/gallery.css'
 
 type PublishedBook = {
@@ -98,7 +99,7 @@ export default function LibraryCatalog() {
       blurb: 'New books shared by the Libra writing community.',
       books: published.books
         .filter((book) => matches(book.title, book.author ?? ''))
-        .map((book) => ({ id: book.id, title: book.title, author: book.author ?? 'Libra writer', detail: formatTag(book.mime_type), tag: formatTag(book.mime_type) }))
+        .map((book) => ({ id: communityRouteId(book.id), title: book.title, author: book.author ?? 'Libra writer', detail: formatTag(book.mime_type), tag: formatTag(book.mime_type) }))
     }
     return [fromSamples('favourites'), fromSamples('classics'), community].filter((shelf) => shelf.books.length > 0)
   }, [published.books, search])

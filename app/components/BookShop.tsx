@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import BookCover from './gallery/BookCover'
 import LibraHeader from './gallery/LibraHeader'
-import { Drawer } from './gallery/Drawer'
-import { formatPrice, useCurrency, usePricing, type Plan } from './gallery/pricing'
+import { OrderDrawer, planLength } from './gallery/OrderDrawer'
+import { formatPrice, useCurrency, usePricing } from './gallery/pricing'
 import './gallery/gallery.css'
 
 export type ShopBook =
@@ -23,7 +23,10 @@ export type ShopBook =
   }
   | {
     kind: 'community'
+    /** Route id, w<number>. */
     id: string
+    /** Database id, for the uploaded file. */
+    fileId: string
     title: string
     author: string
     year: string | null
@@ -44,22 +47,15 @@ function formatLabel(mimeType: string) {
   return mimeType === 'application/pdf' ? 'PDF' : mimeType === 'application/epub+zip' ? 'EPUB' : 'Text'
 }
 
-function planLength(plan: Plan) {
-  if (plan.kind === 'premium') return plan.duration_days === 1 ? '1 day' : `${plan.duration_days} days`
-  return plan.minutes === 60 ? '1 hour' : `${plan.minutes} minutes`
-}
 
 export default function BookShop({ book }: { book: ShopBook }) {
   const { pricing, error: pricingError } = usePricing()
   const [currencyCode, setCurrencyCode] = useCurrency()
   const [access, setAccess] = useState<Access>('free')
   const [planId, setPlanId] = useState<string | null>(null)
-  const [coupon, setCoupon] = useState('')
   const [format, setFormat] = useState<'online' | 'download'>('online')
   const [expanded, setExpanded] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   const [bagOpen, setBagOpen] = useState(false)
 
   // Lets the gallery's flying artwork know the page image is in place.
@@ -91,37 +87,12 @@ export default function BookShop({ book }: { book: ShopBook }) {
   function chooseAccess(next: Access) {
     setAccess(next)
     setPlanId(null)
-    setError('')
-  }
-
-  async function checkout() {
-    if (!plan || !currency) return
-    setBusy(true)
-    setError('')
-    try {
-      const response = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planId: plan.id, methodKey: 'card', currency: currency.code, coupon })
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        setError(data.error ?? 'Unable to start checkout.')
-        return
-      }
-      if (typeof data.url !== 'string') throw new Error('Checkout did not return a payment URL.')
-      window.location.assign(data.url)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to start checkout.')
-    } finally {
-      setBusy(false)
-    }
   }
 
   const fullText = book.excerpt ? `${book.description} It begins: ${book.excerpt}` : book.description
   const short = fullText.length > 190 && !expanded ? `${fullText.slice(0, 180).replace(/\s+\S*$/, '')} …` : fullText
   const readerHref = `/reader/${book.id}`
-  const fileUrl = `/api/content/files?id=${encodeURIComponent(book.id)}&kind=book`
+  const fileUrl = book.kind === 'community' ? `/api/content/files?id=${encodeURIComponent(book.fileId)}&kind=book` : ''
   const byline = [book.author, book.year].filter(Boolean).join(', ')
 
   let price: React.ReactNode
@@ -236,7 +207,7 @@ export default function BookShop({ book }: { book: ShopBook }) {
                 : <a className="gs-cta" href={fileUrl} download>Download {formatLabel(book.mimeType)}</a>
               : access === 'free'
                 ? <Link className="gs-cta" href={readerHref}>Start reading</Link>
-                : <button type="button" className="gs-cta" disabled={!plan || !cardAvailable} onClick={() => { setError(''); setBagOpen(true) }}>
+                : <button type="button" className="gs-cta" disabled={!plan || !cardAvailable} onClick={() => setBagOpen(true)}>
                   {!plan ? 'Choose a plan' : !cardAvailable ? 'Card payments unavailable' : `Add to order · ${formatPrice(Number(plan.price_usd), currency)}`}
                 </button>}
           </div>
@@ -245,32 +216,14 @@ export default function BookShop({ book }: { book: ShopBook }) {
         </div>
       </article>
 
-      {bagOpen && plan && book.kind === 'sample' && <Drawer
-        title="Your order"
+      {bagOpen && plan && book.kind === 'sample' && <OrderDrawer
+        plan={plan}
+        currency={currency}
+        cardAvailable={cardAvailable}
+        thumb={<BookCover title={book.title} author={book.author} />}
+        note={`Bought from ${book.title}. Use it on any locked page in the library.`}
         onClose={() => setBagOpen(false)}
-        footer={(close) => <>
-          <p className="gs-total"><span>Total</span><span>{formatPrice(Number(plan.price_usd), currency)}</span></p>
-          <button type="button" className="gs-cta" disabled={!cardAvailable || busy} onClick={() => void checkout()}>
-            {busy ? 'Starting checkout…' : 'Checkout'}
-          </button>
-          <button type="button" className="gs-cta is-light" onClick={close}>Keep browsing</button>
-        </>}
-      >
-        <div className="gs-line-item">
-          <span className="gs-line-thumb"><BookCover title={book.title} author={book.author} /></span>
-          <div>
-            <p className="gs-line-title">{planLength(plan)}{access === 'premium' ? ' of Premium' : ' of reading time'}</p>
-            <p className="gs-line-meta">Bought from {book.title}. Use it on any locked page in the library. Paid in {currency?.code ?? 'USD'}.</p>
-          </div>
-          <span className="gs-line-price">{formatPrice(Number(plan.price_usd), currency)}</span>
-        </div>
-        <div className="gs-option" style={{ marginTop: 28 }}>
-          <label className="gs-option-label" htmlFor="coupon">Coupon: <span>optional, applied at checkout</span></label>
-          <input id="coupon" className="gs-chip" style={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left', cursor: 'text' }} value={coupon} onChange={(event) => setCoupon(event.target.value)} placeholder="Code" autoComplete="off" />
-        </div>
-        {error && <p className="gs-error" role="alert">{error} {/sign in/i.test(error) && <Link href="/login">Log in</Link>}</p>}
-        <p className="gs-fine">Secure card checkout by Stripe. Time is added to your account as soon as the payment clears.</p>
-      </Drawer>}
+      />}
     </main>
   )
 }

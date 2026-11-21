@@ -1,117 +1,102 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
-
-type Plan = { id: string; name: string; kind: string; minutes: number | null; duration_days: number | null; price_usd: string }
-type Currency = { code: string; symbol: string; rate_to_usd: string }
-type PaymentMethod = { key: string; label: string; provider: string; currencies: string[] }
+import LibraHeader from '../components/gallery/LibraHeader'
+import { OrderDrawer, PlanThumb, planLength } from '../components/gallery/OrderDrawer'
+import { formatPrice, useCurrency, usePricing, type Plan } from '../components/gallery/pricing'
+import '../components/gallery/gallery.css'
+import '../components/gallery/libra.css'
 
 export default function PricingPage() {
-  const [plans, setPlans] = useState<Plan[]>([])
-  const [currencies, setCurrencies] = useState<Currency[]>([])
-  const [methods, setMethods] = useState<PaymentMethod[]>([])
-  const [currency, setCurrency] = useState('USD')
-  const [coupon, setCoupon] = useState('')
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState('')
+  const { pricing, error } = usePricing()
+  const [currencyCode, setCurrencyCode] = useCurrency()
+  const [chosen, setChosen] = useState<Plan | null>(null)
 
-  useEffect(() => {
-    fetch('/api/plans')
-      .then(async (response) => {
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.error ?? 'Unable to load plans.')
-        setPlans(data.plans)
-        setCurrencies(data.currencies)
-        setMethods(data.methods)
-        if (!data.currencies.some((item: Currency) => item.code === 'USD')) {
-          setCurrency(data.currencies[0]?.code ?? '')
-        }
-      })
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load plans.'))
-  }, [])
+  const currencies = pricing?.currencies ?? []
+  const currency = currencies.find((item) => item.code === currencyCode) ?? currencies.find((item) => item.code === 'USD') ?? currencies[0]
+  const cardAvailable = Boolean(currency && pricing?.methods.some((method) => method.key === 'card' && method.currencies.includes(currency.code)))
+  const plans = [...(pricing?.plans ?? [])].sort((a, b) => (a.kind === b.kind ? Number(a.price_usd) - Number(b.price_usd) : a.kind === 'premium' ? 1 : -1))
 
-  const selectedCurrency = currencies.find((item) => item.code === currency)
-  const cardAvailable = methods.some((item) => item.key === 'card' && item.currencies.includes(currency))
-
-  async function checkout(planId: string) {
-    setBusy(planId)
-    setError('')
-    try {
-      const response = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planId, methodKey: 'card', currency, coupon })
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        setError(data.error ?? 'Unable to start checkout.')
-        return
-      }
-      if (typeof data.url !== 'string') throw new Error('Checkout did not return a payment URL.')
-      window.location.assign(data.url)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to start checkout.')
-    } finally {
-      setBusy(null)
-    }
+  function perUnit(plan: Plan) {
+    if (!currency) return ''
+    if (plan.kind === 'premium' && plan.duration_days) return `${formatPrice(Number(plan.price_usd) / plan.duration_days, currency)} a day`
+    if (plan.minutes) return `${formatPrice((Number(plan.price_usd) / plan.minutes) * 60, currency)} an hour`
+    return ''
   }
 
   return (
-    <main style={{ maxWidth: 980, margin: '0 auto', padding: 32 }}>
-      <h1 style={{ textAlign: 'center', marginBottom: 12 }}>Choose your plan</h1>
-      <p style={{ textAlign: 'center', color: '#475569', marginBottom: 24 }}>Get extra reading time or unlock the full library with Premium.</p>
-
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-        <label>
-          Currency{' '}
-          <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
-            {currencies.map((item) => <option key={item.code} value={item.code}>{item.code}</option>)}
-          </select>
-        </label>
-        <label>
-          Coupon{' '}
-          <input value={coupon} onChange={(event) => setCoupon(event.target.value)} placeholder="Optional" />
-        </label>
-      </div>
-
-      {error && (
-        <p role="alert" style={{ color: '#b91c1c', textAlign: 'center' }}>
-          {error} {error.includes('Sign in') && <Link href="/login">Log in</Link>}
-        </p>
-      )}
-
-      {plans.length === 0 && !error
-        ? <p style={{ textAlign: 'center' }}>Loading available plans…</p>
-        : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 24 }}>
-          <div style={{ background: '#fff', borderRadius: 18, padding: 24, boxShadow: '0 10px 30px rgba(15,23,42,0.05)' }}>
-            <h2>Free</h2>
-            <p style={{ fontSize: 32, fontWeight: 700, margin: '12px 0' }}>Free</p>
-            <p style={{ color: '#475569', minHeight: 48 }}>Read the free half of each sample title.</p>
-            <Link href="/library" style={{ display: 'inline-block', background: '#111827', color: '#fff', textDecoration: 'none', padding: '10px 18px', borderRadius: 999 }}>Start reading</Link>
+    <main className="gs-root">
+      <LibraHeader />
+      <section className="lp-page">
+        <div className="lp-intro">
+          <div>
+            <p className="gs-crumb"><Link href="/library">Library</Link> / Plans</p>
+            <h1 className="gs-kicker">Reading plans</h1>
+            <p className="gs-desc">The first half of every sample book is free, and community books are always free. Add reading time when you want to keep going, or go Premium for no limits at all.</p>
           </div>
-          {plans.map((plan) => {
-            const amount = selectedCurrency ? Number(plan.price_usd) * Number(selectedCurrency.rate_to_usd) : Number(plan.price_usd)
+          {currencies.length > 1 && <div className="gs-option">
+            <p className="gs-option-label">Currency: <span>{currency?.code}</span></p>
+            <div className="gs-chips">
+              {currencies.map((item) => <button key={item.code} type="button" className="gs-chip" aria-pressed={currency?.code === item.code} onClick={() => setCurrencyCode(item.code)}>{item.code}</button>)}
+            </div>
+          </div>}
+        </div>
+
+        {error && <p className="gs-error" role="alert">Plans could not be loaded right now. {error}</p>}
+
+        <div className="lp-grid">
+          <article className="lp-card" style={{ animationDelay: '0ms' }}>
+            <p className="lp-tag">Always</p>
+            <h2 className="lp-name">Free</h2>
+            <p className="lp-price">Free</p>
+            <p className="lp-sub">No card needed</p>
+            <ul className="lp-features">
+              <li>The first half of every sample book</li>
+              <li>Every community book, in full</li>
+              <li>Day and night reading</li>
+            </ul>
+            <Link className="gs-cta is-light" href="/library">Start reading</Link>
+          </article>
+
+          {!pricing && !error && [0, 1, 2].map((index) => <div key={index} className="lp-skeleton" aria-hidden="true" />)}
+
+          {plans.map((plan, index) => {
+            const premium = plan.kind === 'premium'
             return (
-              <div key={plan.id} style={{ background: '#fff', borderRadius: 18, padding: 24, boxShadow: '0 10px 30px rgba(15,23,42,0.05)' }}>
-                <h2>{plan.name}</h2>
-                <p style={{ fontSize: 32, fontWeight: 700, margin: '12px 0' }}>
-                  {selectedCurrency?.symbol}{amount.toFixed(2)} <small style={{ fontSize: 14 }}>{currency}</small>
-                </p>
-                <p style={{ color: '#475569', minHeight: 48 }}>
-                  {plan.kind === 'premium' ? `${plan.duration_days} days of Premium access.` : `${plan.minutes} minutes of additional reading.`}
-                </p>
-                <button
-                  disabled={!cardAvailable || busy !== null}
-                  onClick={() => void checkout(plan.id)}
-                  style={{ background: '#111827', color: '#fff', border: 0, padding: '10px 18px', borderRadius: 999, opacity: !cardAvailable ? 0.5 : 1 }}
-                >
-                  {busy === plan.id ? 'Starting checkout…' : cardAvailable ? 'Continue to checkout' : 'Payment unavailable'}
+              <article key={plan.id} className={`lp-card${premium ? ' is-premium' : ''}`} style={{ animationDelay: `${(index + 1) * 70}ms` }}>
+                <p className="lp-tag">{premium ? 'No limits' : 'Top up'}</p>
+                <h2 className="lp-name">{premium ? plan.name : planLength(plan)}</h2>
+                <p className="lp-price">{formatPrice(Number(plan.price_usd), currency)}</p>
+                <p className="lp-sub">{perUnit(plan)}</p>
+                <ul className="lp-features">
+                  {premium
+                    ? <><li>Every page of every book, for {planLength(plan)}</li><li>No clock while you read</li><li>One payment, no automatic renewal</li></>
+                    : <><li>{planLength(plan)} of reading time</li><li>Use it on any locked page</li><li>Only counts down while a locked page is open</li></>}
+                </ul>
+                <button type="button" className="gs-cta" disabled={!cardAvailable} onClick={() => setChosen(plan)}>
+                  {cardAvailable ? 'Add to order' : 'Card payments unavailable'}
                 </button>
-              </div>
+              </article>
             )
           })}
-        </div>}
+        </div>
+
+        <div className="lp-faq">
+          <div><h3>How does reading time work?</h3><p>It only counts down while a locked page is open, in 15-second steps, and stops the moment you close the book.</p></div>
+          <div><h3>Does Premium renew?</h3><p>No. Premium is a one-time purchase for the days shown, so nothing is charged again unless you buy it again.</p></div>
+          <div><h3>Which currencies can I pay in?</h3><p>{currencies.length ? `${currencies.map((item) => item.code).join(', ')}. ` : ''}Prices are converted from US dollars at the rate set by the Libra team.</p></div>
+        </div>
+      </section>
+
+      {chosen && <OrderDrawer
+        plan={chosen}
+        currency={currency}
+        cardAvailable={cardAvailable}
+        thumb={<PlanThumb plan={chosen} />}
+        note="Use it on any book in the library."
+        onClose={() => setChosen(null)}
+      />}
     </main>
   )
 }

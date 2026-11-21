@@ -7,7 +7,7 @@ Libra is a Next.js reading app. Render hosts the web service; Neon provides Post
 1. Install Node.js 20 or newer.
 2. Create a Neon project and copy its pooled connection string. Keep `sslmode=require` in the URL.
 3. Run the contents of `schema.sql` against the Neon database using the Neon SQL Editor. Re-run it after pulling schema changes; its table and seed statements are designed to preserve existing records.
-4. Create `.env.local` with `DATABASE_URL`, `SESSION_SECRET` (at least 32 random characters), `ADMIN_EMAIL`, and `ADMIN_PASSWORD` (at least 12 characters). Add the Stripe settings if using payments.
+4. Create `.env.local` with `DATABASE_URL`, `SESSION_SECRET` (at least 32 random characters), `ADMIN_EMAIL`, and `ADMIN_PASSWORD` (at least 12 characters). Add the Stripe settings if using payments. To use a local Postgres instead of Neon, also set `DATABASE_SSL=false`.
 5. Install and start the app:
 
    ```powershell
@@ -34,6 +34,8 @@ Never expose `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_PASSWORD`, or Stripe secre
 - Email/password signup and login with bcrypt password hashes and signed, HTTP-only session cookies.
 - The library opens as a curved 3D gallery wall at `/library`: scroll, drag or use the arrow keys to walk along the shelves, click a cover to bring it forward, then click it again to open its book page (scroll or press Esc to step back). The sun/moon button switches between day and night view, remembered per device. A Gallery/List switch (top right) changes to a grid; phones start in the list. Covers are drawn from each book's title, so uploaded books need no cover image.
 - Each book has a shop-style page at `/book/[id]` with access, plan and currency choices; Add to order slides in an order drawer (with the coupon field) that starts the existing Stripe checkout. Public-domain classics (ids from 1001) are included as sample titles.
+- Community books live at `/book/w<id>` and `/reader/w<id>` so they never clash with the sample books' numbers; older plain-number links still open the right book.
+- The reader shows a progress bar, a live reading-time countdown, and clear sign-in or add-time panels on locked pages; turn pages with the arrow keys or by swiping.
 - Sample library and reader pages. The sample reader serves only the free half to signed-out users; authenticated users can unlock the rest with reading time or an active Premium entitlement.
 - The super administrator has a separate overview at `/admin`; delegated administrators land on a workspace dashboard showing only their granted sections.
 - Only the super administrator can promote an administrator to super administrator. Super administrator accounts cannot be edited or deleted through the platform.

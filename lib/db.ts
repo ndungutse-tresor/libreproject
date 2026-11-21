@@ -10,7 +10,8 @@ export function getPool() {
   if (!globalForPg.libraPool) {
     globalForPg.libraPool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: true },
+      // Neon and other hosted databases need TLS. DATABASE_SSL=false is only for a local Postgres.
+      ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: true },
       max: 5
     })
   }

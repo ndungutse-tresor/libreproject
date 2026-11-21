@@ -57,8 +57,9 @@ type Geometry = {
 const LUT_STEPS = 1536
 
 function buildGeometry(width: number, height: number): Geometry {
-  // Portrait screens crop the sides rather than shrinking the room.
-  const virtualWidth = Math.max(width, height * 1.5)
+  // Portrait screens crop the sides rather than shrinking the room, and lean in
+  // further so the pieces stay big enough to recognise on a phone.
+  const virtualWidth = height > width ? Math.max(width, height * 2.1) : Math.max(width, height * 1.5)
   const f = (virtualWidth / 2) / Math.tan((90 * Math.PI) / 360)
   const A = 1.2 * f // lateral semi-axis of the oval room
   const B = 3.6 * f // depth semi-axis

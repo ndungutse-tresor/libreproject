@@ -13,11 +13,11 @@ export default function ProfileQuickLink() {
 
   useEffect(() => {
     let active = true
-    fetch('/api/profile')
+    fetch('/api/auth/me')
       .then(async (response) => {
         if (!response.ok) return
         const data = await response.json()
-        if (active) setProfile(data.profile)
+        if (active) setProfile(data.user ?? null)
       })
       .catch((error: unknown) => {
         console.error('Unable to load account shortcut:', error)

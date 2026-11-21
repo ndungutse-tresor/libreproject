@@ -26,10 +26,10 @@ export default function LibraHeader({ search, onSearch }: Props) {
 
   useEffect(() => {
     let active = true
-    fetch('/api/profile')
+    fetch('/api/auth/me')
       .then(async (response) => {
         const data = response.ok ? await response.json() : null
-        if (active) setProfile(data?.profile ?? null)
+        if (active) setProfile(data?.user ?? null)
       })
       .catch(() => { if (active) setProfile(null) })
     return () => { active = false }

@@ -143,12 +143,12 @@ export default function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           <legend>{mode === 'login' ? 'Continue as' : 'I want to join as a'}</legend>
           <div className="auth-account-options">
             <label className={`auth-account-option ${accountType === 'reader' ? 'is-selected' : ''}`}>
-              <input type="checkbox" name="accountType" value="reader" checked={accountType === 'reader'} onChange={() => setAccountType(accountType === 'reader' ? null : 'reader')} />
+              <input type="radio" name="accountType" value="reader" checked={accountType === 'reader'} onChange={() => setAccountType('reader')} />
               <span className="auth-account-option-icon" aria-hidden="true">▤</span>
               <span><strong>Reader</strong><small>Explore books and ideas</small></span>
             </label>
             <label className={`auth-account-option ${accountType === 'writer' ? 'is-selected' : ''}`}>
-              <input type="checkbox" name="accountType" value="writer" checked={accountType === 'writer'} onChange={() => setAccountType(accountType === 'writer' ? null : 'writer')} />
+              <input type="radio" name="accountType" value="writer" checked={accountType === 'writer'} onChange={() => setAccountType('writer')} />
               <span className="auth-account-option-icon" aria-hidden="true">✎</span>
               <span><strong>Writer</strong><small>Submit work for review</small></span>
             </label>
