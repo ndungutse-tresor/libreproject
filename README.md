@@ -32,6 +32,8 @@ Never expose `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_PASSWORD`, or Stripe secre
 ## Features and current limits
 
 - Email/password signup and login with bcrypt password hashes and signed, HTTP-only session cookies.
+- The library opens as a curved 3D gallery wall at `/library`: scroll, drag or use the arrow keys to walk along the shelves, and click a cover to fly it into its book page. A Gallery/List switch (top right) changes to a grid; phones start in the list. Covers are drawn from each book's title, so uploaded books need no cover image.
+- Each book has a shop-style page at `/book/[id]` with access, plan, currency and coupon choices that start the existing Stripe checkout. Public-domain classics (ids from 1001) are included as sample titles.
 - Sample library and reader pages. The sample reader serves only the free half to signed-out users; authenticated users can unlock the rest with reading time or an active Premium entitlement.
 - The super administrator has a separate overview at `/admin`; delegated administrators land on a workspace dashboard showing only their granted sections.
 - Only the super administrator can promote an administrator to super administrator. Super administrator accounts cannot be edited or deleted through the platform.
