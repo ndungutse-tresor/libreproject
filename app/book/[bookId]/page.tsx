@@ -1,6 +1,6 @@
 import { cache } from 'react'
 import { notFound } from 'next/navigation'
-import { books, collections } from '../../libra-data'
+import { books, collections, SUMMARY_CREDIT } from '../../libra-data'
 import BookShop, { type ShopBook } from '../../components/BookShop'
 import { getPool } from '@/lib/db'
 import { communityRouteId, parseBookRoute } from '../../book-routes'
@@ -19,7 +19,11 @@ const findBook = cache(async (bookId: string): Promise<ShopBook | null> => {
       author: sample.author,
       year: sample.year ?? null,
       description: sample.description,
-      excerpt: sample.pages[0] ?? '',
+      // The opening of the first page, without its chapter heading.
+      excerpt: (sample.pages[0] ?? '').replace(/^##[^\n]*\n+/, '').split(/\n\s*\n/)[0],
+      format: sample.format ?? 'summary',
+      subtitle: sample.subtitle ?? null,
+      credit: sample.format === 'original' ? null : SUMMARY_CREDIT,
       collection: collections[sample.collection].title,
       pageCount: sample.pages.length,
       freePages: Math.ceil(sample.pages.length / 2)

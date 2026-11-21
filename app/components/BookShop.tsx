@@ -20,6 +20,10 @@ export type ShopBook =
     collection: string
     pageCount: number
     freePages: number
+    format: 'summary' | 'original'
+    subtitle: string | null
+    /** Who wrote the summary, for summary books. */
+    credit: string | null
   }
   | {
     kind: 'community'
@@ -135,7 +139,8 @@ export default function BookShop({ book }: { book: ShopBook }) {
           <p className="gs-crumb"><Link href="/library">Library</Link> / {book.collection}</p>
           <h1 className="gs-kicker">{book.collection}</h1>
           <h2 className="gs-title">{book.title}</h2>
-          <p className="gs-byline">{byline}</p>
+          {book.kind === 'sample' && book.subtitle && <p className="gs-subtitle">{book.subtitle}</p>}
+          <p className="gs-byline">{byline}{book.kind === 'sample' && book.format === 'original' ? ' · A Libra original' : ''}</p>
           <p className="gs-desc">
             {short}{' '}
             {fullText.length > 190 && <button type="button" className="gs-more" onClick={() => setExpanded((value) => !value)}>{expanded ? 'Show less' : 'Read more »'}</button>}
@@ -146,7 +151,9 @@ export default function BookShop({ book }: { book: ShopBook }) {
 
           <p className="gs-note">
             {book.kind === 'sample'
-              ? `A Libra summary: the book’s key ideas in ${book.pageCount} short pages, not the full text. Reading time only counts down while a locked page is open, and pauses when you close the book. Premium removes every limit.`
+              ? `${book.format === 'original'
+                ? `A Libra original by ${book.author}, written for Libra, in ${book.pageCount} chapters.`
+                : `Summary by ${book.credit ?? 'the Libra team'}: the book’s key ideas in ${book.pageCount} short pages, not the full text.`} Reading time only counts down while a locked page is open, and pauses when you close the book. Premium removes every limit.`
               : 'Community books are free to read. Writers share them through the Libra writer studio.'}
           </p>
 

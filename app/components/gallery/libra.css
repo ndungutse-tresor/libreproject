@@ -36,9 +36,11 @@
 @keyframes lr-turn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
 
 .lr-text { margin: 0; color: var(--gs-ink); font: 400 clamp(17px, 2.1vw, 20px)/1.8 var(--gs-serif); }
-.lr-text::first-letter { float: left; margin: 6px 10px 0 0; font: 600 3.4em/0.8 var(--gs-display); }
+.lr-text > p { margin: 0; }
+.lr-text > p + p { margin-top: 1em; }
+.lr-text > p:first-of-type::first-letter { float: left; margin: 6px 10px 0 0; font: 600 3.4em/0.8 var(--gs-display); }
+.lr-chapter { margin: 0 0 22px; padding-bottom: 14px; border-bottom: 1px solid var(--gs-line); color: var(--gs-ink); font: 600 clamp(20px, 2.6vw, 26px)/1.15 var(--gs-display); letter-spacing: 0.02em; text-transform: uppercase; }
 .lr-text.is-file { white-space: pre-wrap; font-size: 17px; }
-.lr-text.is-file::first-letter { float: none; margin: 0; font: inherit; }
 
 .lr-folio { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); color: var(--gs-faint); font: italic 400 12px/1 var(--gs-serif); }
 

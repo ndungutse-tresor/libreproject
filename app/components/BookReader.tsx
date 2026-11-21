@@ -149,7 +149,7 @@ export default function BookReader({ bookId, title, pageCount }: { bookId: numbe
                 <div className="lr-lock-actions"><button type="button" className="gs-cta" onClick={() => void loadPage(pageNumber)}>Try again</button></div>
               </>}
             </div>
-            : <p className="lr-text">{shown?.page.content ?? ' '}</p>}
+            : <PageText content={shown?.page.content ?? ''} />}
           <span className="lr-folio">{pageNumber}</span>
         </section>
 
@@ -166,5 +166,18 @@ export default function BookReader({ bookId, title, pageCount }: { bookId: numbe
         </p>
       </article>
     </main>
+  )
+}
+
+/** A page of text: an optional "## Heading" line, then paragraphs separated by blank lines. */
+function PageText({ content }: { content: string }) {
+  if (!content) return <div className="lr-text">{'\u00a0'}</div>
+  const blocks = content.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean)
+  return (
+    <div className="lr-text">
+      {blocks.map((block, index) => block.startsWith('## ')
+        ? <h2 key={index} className="lr-chapter">{block.slice(3)}</h2>
+        : <p key={index}>{block}</p>)}
+    </div>
   )
 }

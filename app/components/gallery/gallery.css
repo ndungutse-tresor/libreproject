@@ -505,6 +505,7 @@ html[data-gs-theme='night'] .gs-select {
 
 .gs-kicker { margin: 0; color: var(--gs-ink); font: 600 clamp(32px, 3.6vw, 48px)/0.95 var(--gs-display); letter-spacing: 0.005em; text-transform: uppercase; }
 .gs-title { margin: 10px 0 0; color: var(--gs-ink); font: 600 22px/1.05 var(--gs-display); letter-spacing: 0.02em; text-transform: uppercase; }
+.gs-subtitle { margin: 6px 0 0; color: var(--gs-text); font: 400 15px/1.35 var(--gs-serif); }
 .gs-byline { margin: 6px 0 0; color: var(--gs-muted); font: italic 400 14px/1.3 var(--gs-serif); }
 
 .gs-desc { margin: 16px 0 0; color: var(--gs-text); font: 400 13.5px/1.6 var(--gs-serif); }

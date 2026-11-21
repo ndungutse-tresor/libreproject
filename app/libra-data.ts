@@ -1,6 +1,6 @@
 import { summaryBooks } from './libra-summaries'
+import { originalBooks } from './libra-originals'
 import type { Collection } from './libra-collections'
-
 
 export type Book = {
   id: number
@@ -11,8 +11,15 @@ export type Book = {
   /** Which wall of the gallery the book hangs on. */
   collection: Collection
   year?: string
+  /** 'original' books are written for Libra; everything else is a page-by-page summary. */
+  format?: 'summary' | 'original'
+  subtitle?: string
+  /** Pages may start with a "## Heading" line; blank lines separate paragraphs. */
   pages: string[]
 }
+
+/** Credit shown on summary pages: the summaries are written for Libra. */
+export const SUMMARY_CREDIT = 'Tresor Ndungutse'
 
 export { collections, collectionOrder, type Collection } from './libra-collections'
 
@@ -230,6 +237,7 @@ export const books: Book[] = [
       'Through it all, Watson records the cases, and their friendship becomes the heart of the stories.'
     ]
   },
+  ...originalBooks,
   ...summaryBooks
 ]
 
