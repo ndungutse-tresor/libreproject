@@ -1,17 +1,17 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { buildCorridor, drawRoom, focusPose, frameOf, hang, hangAll, mixPose, samePose, type Corridor, type Pose, type Room, type Slot } from './corridor'
 
 /**
- * A curved gallery wall. Items hang on the inside of an oval room and slide
- * along the wall as the visitor scrolls or drags. The room itself is drawn once
- * as an SVG backdrop; only the hung items move, so a frame costs one transform
- * per visible item.
+ * A gallery corridor. The visitor walks round a gently curving corridor with work
+ * hung on both walls: scrolling or dragging walks forward, so pieces come up out of
+ * the bend ahead, grow as they near and slide past. Clicking a piece makes the
+ * visitor step over and look at it closely; clicking it again opens it.
  *
- * Coordinates: the camera sits at the origin looking down -z. CSS perspective
- * places the viewer `f` pixels in front of the screen plane, so a world point
- * (x, y, z) is translated by (x, y, z + f) and projects to
- * (x * f / -z, y * f / -z) around the perspective origin.
+ * The room is drawn as an SVG backdrop and the pieces are DOM buttons placed with
+ * CSS 3D transforms, using the same camera (see ./corridor). While walking, only the
+ * pieces move; the room is redrawn only while the camera itself turns and steps.
  */
 
 export type WallItem = {
@@ -21,6 +21,10 @@ export type WallItem = {
   aspect: number
   /** Accessible name for the item's button. */
   label: string
+  /** Room name a placard opens, shown under the corridor while the visitor walks past it. */
+  title?: string
+  /** For placards: what "Enter the collection" does. Without it the link is not shown. */
+  onEnter?: () => void
   /** Two short caption lines shown under the work, the second in italics. */
   caption?: [string, string?]
   content: ReactNode
@@ -29,130 +33,21 @@ export type WallItem = {
 type Props = {
   items: WallItem[]
   onOpen: (item: WallItem) => void
-  /** Remembers the wall position (per tab) so returning from a detail page lands where the visitor left. */
+  /** Remembers the walk position (per tab) so returning from a detail page lands where the visitor left. */
   storageKey?: string
+  /** Two short lines (split on " · ") shown by the arrows while walking. */
   hint?: string
-  /** Shown under a piece once it has been brought forward. */
+  /** The same, while a piece is being looked at. */
   focusHint?: string
-}
-
-type Point = { x: number; z: number; s: number }
-
-type Geometry = {
-  width: number
-  height: number
-  f: number
-  horizon: number
-  itemHeight: number
-  itemY: number
-  gap: number
-  ceilY: number
-  floorY: number
-  pts: Point[]
-  perimeter: number
-  /** Arc position directly ahead of the camera. */
-  sAhead: number
-}
-
-const LUT_STEPS = 1536
-
-function buildGeometry(width: number, height: number): Geometry {
-  // Portrait screens crop the sides rather than shrinking the room, and lean in
-  // further so the pieces stay big enough to recognise on a phone.
-  const virtualWidth = height > width ? Math.max(width, height * 2.1) : Math.max(width, height * 1.5)
-  const f = (virtualWidth / 2) / Math.tan((90 * Math.PI) / 360)
-  const A = 1.2 * f // lateral semi-axis of the oval room
-  const B = 3.6 * f // depth semi-axis
-  const zc = -5 * f + B // room centre on the z axis
-  const cx = -0.45 * A // room centre sits left of the camera, so the right-hand wall is near
-  const itemHeight = 0.62 * f
-
-  const pts: Point[] = []
-  let perimeter = 0
-  let prev: Point | null = null
-  for (let i = 0; i <= LUT_STEPS; i++) {
-    const t = (i / LUT_STEPS) * Math.PI * 2
-    const p: Point = { x: cx + A * Math.sin(t), z: zc - B * Math.cos(t), s: 0 }
-    if (prev) perimeter += Math.hypot(p.x - prev.x, p.z - prev.z)
-    p.s = perimeter
-    pts.push(p)
-    prev = p
-  }
-
-  // Where the wall crosses the camera's line of sight (x = 0) on the far side.
-  const tAhead = Math.asin(Math.max(-1, Math.min(1, -cx / A)))
-  const index = (tAhead / (Math.PI * 2)) * LUT_STEPS
-  const lo = Math.floor(index)
-  const sAhead = pts[lo].s + (pts[Math.min(lo + 1, LUT_STEPS)].s - pts[lo].s) * (index - lo)
-
-  return {
-    width,
-    height,
-    f,
-    horizon: height * 0.57,
-    itemHeight,
-    itemY: -0.04 * itemHeight,
-    gap: 0.55 * itemHeight,
-    ceilY: -1.15 * itemHeight,
-    floorY: 1.2 * itemHeight,
-    pts,
-    perimeter,
-    sAhead
-  }
-}
-
-function pointAt(g: Geometry, s: number) {
-  const { pts, perimeter } = g
-  const wrapped = ((s % perimeter) + perimeter) % perimeter
-  let lo = 0
-  let hi = pts.length - 1
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1
-    if (pts[mid].s < wrapped) lo = mid
-    else hi = mid
-  }
-  const a = pts[lo]
-  const b = pts[hi]
-  const k = (wrapped - a.s) / (b.s - a.s || 1)
-  const tx = b.x - a.x
-  const tz = b.z - a.z
-  const length = Math.hypot(tx, tz) || 1
-  return { x: a.x + tx * k, z: a.z + tz * k, tx: tx / length, tz: tz / length }
-}
-
-function roomPaths(g: Geometry) {
-  const project = (x: number, y: number, z: number): [number, number] => [g.width / 2 + (x * g.f) / -z, g.horizon + (y * g.f) / -z]
-  const LIMIT = 1e5
-  const clamp = (value: number) => Math.max(-LIMIT, Math.min(LIMIT, value))
-  const edge = (y: number) => {
-    // The longest run of wall points in front of the camera, unwrapped across the seam.
-    const flags = g.pts.map((p) => p.z < -g.f * 0.2)
-    const doubled = [...g.pts, ...g.pts]
-    let best: Point[] = []
-    let run: Point[] = []
-    doubled.forEach((p, i) => {
-      if (flags[i % g.pts.length]) run.push(p)
-      else {
-        if (run.length > best.length) best = run
-        run = []
-      }
-    })
-    if (run.length > best.length) best = run
-    return best.slice(0, g.pts.length).map((p) => project(p.x, y, p.z).map(clamp) as [number, number])
-  }
-  const line = (pts: [number, number][]) => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ')
-  const ceiling = line(edge(g.ceilY))
-  const floor = line(edge(g.floorY))
-  return {
-    ceiling,
-    floor,
-    ceilingFill: `${ceiling} L${LIMIT} ${-LIMIT} L${-LIMIT} ${-LIMIT} Z`,
-    floorFill: `${floor} L${LIMIT} ${LIMIT} L${-LIMIT} ${LIMIT} Z`
-  }
+  /** Label that follows the pointer over a piece. */
+  lookLabel?: string
+  /** Label over the piece being looked at. */
+  openLabel?: string
+  walkingLabel?: string
+  enterLabel?: string
 }
 
 type Rect = { x: number; y: number; w: number; h: number }
-type Box = { left: number; top: number; width: number; height: number }
 
 /**
  * Where the detail page draws its main image (see .gs-product / .gs-media-frame),
@@ -174,49 +69,16 @@ function detailFrame(aspect: number): Rect {
   return { x: left + column - w, y: 84, w, h }
 }
 
-/** Where a piece sits when it is brought forward: centred and large, with its caption beneath. */
-function focusFrame(stage: Box, aspect: number): Rect {
-  const narrow = stage.width < 700
-  let h = stage.height * (narrow ? 0.5 : 0.62)
-  let w = h * aspect
-  const maxWidth = stage.width * (narrow ? 0.78 : 0.5)
-  if (w > maxWidth) { w = maxWidth; h = w / aspect }
-  return { x: stage.left + (stage.width - w) / 2, y: stage.top + stage.height * 0.46 - h / 2, w, h }
-}
-
 function place(element: HTMLElement, r: Rect) {
   Object.assign(element.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` })
 }
 
-/** A transform that makes an element laid out at `to` appear exactly over `from`. */
-function mapOnto(from: Box, to: Rect) {
-  return `translate(${from.left - to.x}px, ${from.top - to.y}px) scale(${from.width / to.w}, ${from.height / to.h})`
-}
-
 /** A flat copy of the artwork, lifted off the wall. It lives on <body> so it can outlast the page. */
-function makeGhost(art: HTMLElement, item: WallItem, frame: Rect, hint: string) {
-  const ghost = document.createElement('button')
-  ghost.type = 'button'
+function makeGhost(art: HTMLElement) {
+  const ghost = document.createElement('div')
   ghost.className = 'gw-ghost'
-  ghost.setAttribute('aria-label', item.label)
+  ghost.setAttribute('aria-hidden', 'true')
   ghost.appendChild(art.cloneNode(true))
-  const caption = document.createElement('span')
-  caption.className = 'gw-ghost-cap'
-  if (item.caption) {
-    const first = document.createElement('span')
-    first.textContent = item.caption[0]
-    caption.appendChild(first)
-    if (item.caption[1]) {
-      const second = document.createElement('em')
-      second.textContent = item.caption[1]
-      caption.appendChild(second)
-    }
-  }
-  const note = document.createElement('small')
-  note.textContent = hint
-  caption.appendChild(note)
-  ghost.appendChild(caption)
-  place(ghost, frame)
   return ghost
 }
 
@@ -236,6 +98,8 @@ function handOff(ghost: HTMLElement) {
 }
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches
+const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 
 /** Ignores the click that the browser sends at the end of a drag or a dismissing tap. */
 function swallowNextClick() {
@@ -244,116 +108,155 @@ function swallowNextClick() {
   window.setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0)
 }
 
-type Focus = { index: number; item: WallItem; element: HTMLButtonElement; ghost: HTMLButtonElement; from: Box; frame: Rect }
+type Placed = Slot & { item: WallItem; key: string; room: number }
 
-type Placed = { item: WallItem; key: string; copy: number; width: number; height: number; s: number }
+type Flight = { from: Pose; to: Pose; start: number; duration: number }
 
-export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll or drag to walk the wall', focusHint = 'Click to view · Scroll to step back' }: Props) {
+const ROOM_PARTS = ['ceilingFill', 'floorFill', 'innerFill', 'floorLine', 'ceilingLine', 'innerEdge'] as const
+
+export default function GalleryWall({
+  items,
+  onOpen,
+  storageKey,
+  hint = 'Scroll or drag to walk round · Click a piece to look closer',
+  focusHint = 'Click the piece to open it · Scroll or click away to step back',
+  lookLabel = 'Look closer',
+  openLabel = 'Open it',
+  walkingLabel = 'You are walking past',
+  enterLabel = 'Enter the collection'
+}: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
-  const [geometry, setGeometry] = useState<Geometry | null>(null)
+  const roomRefs = useRef<Partial<Record<(typeof ROOM_PARTS)[number], SVGPathElement | null>>>({})
+  const pillRef = useRef<HTMLSpanElement>(null)
+  const [geometry, setGeometry] = useState<Corridor | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const [roomIndex, setRoomIndex] = useState(-1)
 
   const motion = useRef({ offset: 0, target: 0, opening: false, restored: false })
+  const camera = useRef<{ pose: Pose; flight: Flight | null; drawn: Pose | null; room: Room | null }>({ pose: { r: 0, a: 0, yaw: 0 }, flight: null, drawn: null, room: null })
   const drag = useRef<{ x: number; target: number; moved: boolean; lastX: number; lastT: number; velocity: number } | null>(null)
-  const focusRef = useRef<Focus | null>(null)
-
-  /** Sends a brought-forward piece back to its place on the wall. */
-  const unfocus = useCallback((restoreFocus = false) => {
-    const f = focusRef.current
-    if (!f) return
-    focusRef.current = null
-    f.ghost.classList.remove('is-focused', 'is-lifting')
-    f.ghost.classList.add('is-returning')
-    f.ghost.style.transform = mapOnto(f.from, f.frame)
-    stageRef.current?.classList.remove('is-focused')
-    window.setTimeout(() => {
-      f.element.classList.remove('is-lifted')
-      f.ghost.remove()
-      if (restoreFocus) f.element.focus({ preventScroll: true })
-    }, 540)
-  }, [])
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && focusRef.current) unfocus(document.activeElement === focusRef.current.ghost)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      const f = focusRef.current
-      if (f) f.ghost.remove()
-    }
-  }, [unfocus])
+  /** The slot being looked at, and its angle round the ring when the camera set off. */
+  const focusRef = useRef<{ index: number; theta: number } | null>(null)
+  const roomRef = useRef(-1)
+  const clipCache = useRef<string[]>([])
 
   useEffect(() => {
     const stage = stageRef.current
     if (!stage) return
     const measure = () => {
-      if (focusRef.current) unfocus()
       const rect = stage.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) setGeometry(buildGeometry(rect.width, rect.height))
+      if (rect.width > 0 && rect.height > 0) setGeometry(buildCorridor(rect.width, rect.height))
     }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(stage)
     return () => observer.disconnect()
-  }, [unfocus])
+  }, [])
+
+  // A new room size: stand back in the middle of the corridor.
+  useEffect(() => {
+    if (!geometry) return
+    focusRef.current = null
+    setFocused(false)
+    camera.current.pose = geometry.rest
+    camera.current.flight = null
+    camera.current.drawn = null
+  }, [geometry])
 
   const placed = useMemo(() => {
     if (!geometry || items.length === 0) return { list: [] as Placed[], total: 1 }
-    const one = items.map((item) => {
-      const height = item.kind === 'placard' ? geometry.itemHeight * 0.62 : geometry.itemHeight
-      return { item, width: height * item.aspect, height }
+    const sizes = items.map((item) => {
+      const height = item.kind === 'placard' ? geometry.itemHeight * 0.84 : geometry.itemHeight
+      return { width: height * item.aspect, height, placard: item.kind === 'placard' }
     })
-    const length = one.reduce((sum, entry) => sum + entry.width + geometry.gap, 0)
-    // Short collections repeat round the room so the wall never shows a long blank stretch.
-    const copies = items.length >= 4 && length < geometry.perimeter ? Math.ceil(geometry.perimeter / length) : 1
-    const list: Placed[] = []
-    let s = 0
-    for (let copy = 0; copy < copies; copy++) {
-      for (const entry of one) {
-        list.push({ ...entry, key: `${entry.item.key}~${copy}`, copy, s: s + entry.width / 2 })
-        s += entry.width + geometry.gap
-      }
-    }
-    return { list, total: Math.max(s, geometry.perimeter) }
+    // Which collection each piece belongs to: the last placard before it (wrapping round).
+    let current = -1
+    for (let i = items.length - 1; i >= 0 && current < 0; i--) if (items[i].kind === 'placard') current = i
+    const roomOf = items.map((item, index) => {
+      if (item.kind === 'placard') current = index
+      return current
+    })
+    const { slots, total } = hangAll(geometry, sizes)
+    const list: Placed[] = slots.map((slot) => ({ ...slot, item: items[slot.index], key: `${items[slot.index].key}~${slot.copy}`, room: roomOf[slot.index] }))
+    return { list, total }
   }, [geometry, items])
 
-  const paths = useMemo(() => (geometry ? roomPaths(geometry) : null), [geometry])
+  /** Position of a slot along the walk, relative to the camera, wrapped into the stretch that can be seen. */
+  const relative = useCallback((s: number) => {
+    const g = geometry
+    if (!g) return 0
+    const { total } = placed
+    const low = camera.current.pose.a * g.rc - g.behind
+    return ((((s - motion.current.offset - low) % total) + total) % total) + low
+  }, [geometry, placed])
 
   const layout = useCallback(() => {
     const g = geometry
     if (!g) return
-    const { offset } = motion.current
-    const { list, total } = placed
-    const limit = g.perimeter / 2
+    const cam = camera.current
+    if (!cam.drawn || !samePose(cam.drawn, cam.pose)) {
+      const room = drawRoom(g, cam.pose)
+      cam.room = room
+      cam.drawn = cam.pose
+      for (const part of ROOM_PARTS) roomRefs.current[part]?.setAttribute('d', room[part])
+    }
+    const frame = frameOf(g, cam.pose)
+    const clip = cam.room?.clip ?? null
+    const low = cam.pose.a * g.rc - g.behind
+    const high = cam.pose.a * g.rc + g.ahead
+    const { list } = placed
     list.forEach((entry, index) => {
       const element = itemRefs.current[index]
       if (!element) return
-      let rel = (((entry.s - offset) % total) + total) % total
-      if (rel > total / 2) rel -= total
-      const p = Math.abs(rel) < limit - entry.width ? pointAt(g, g.sAhead + rel) : null
-      const screenX = p ? (p.x * g.f) / -p.z : 0
-      if (!p || p.z > -g.f * 0.45 || Math.abs(screenX) > g.width) {
+      const rel = relative(entry.s)
+      const shown = rel < high && rel > low ? hang(g, frame, entry.wall, rel / g.rc, entry.width, clip) : null
+      if (!shown || !shown.visible) {
         if (element.style.visibility !== 'hidden') element.style.visibility = 'hidden'
         return
       }
-      const angle = Math.atan2(-p.tz, p.tx)
       element.style.visibility = 'visible'
-      element.style.transform = `translate3d(${p.x.toFixed(2)}px, ${g.itemY.toFixed(2)}px, ${(p.z + g.f).toFixed(2)}px) rotateY(${angle.toFixed(5)}rad) translate(-50%, -50%)`
+      element.style.transform = `translate3d(${(g.cx + shown.x - entry.width / 2).toFixed(2)}px, ${(g.horizon + g.itemY - entry.height / 2).toFixed(2)}px, ${(g.f - shown.depth).toFixed(2)}px) rotateY(${shown.rotate.toFixed(5)}rad)`
+      // The part of a piece behind the bend is cut away, so it slips out of sight behind the inner wall.
+      let cut = ''
+      if (shown.hidden) {
+        const [from, to] = shown.hidden
+        cut = from <= 0.5 ? `inset(-60% -60% -120% ${to.toFixed(1)}px)` : `inset(-60% ${(entry.width - from).toFixed(1)}px -120% -60%)`
+      }
+      if (clipCache.current[index] !== cut) {
+        clipCache.current[index] = cut
+        element.style.clipPath = cut
+      }
     })
-  }, [geometry, placed])
 
-  // Restore the remembered position once the wall knows its own length.
+    // The collection the visitor is walking past, for the caption under the corridor.
+    let room = -1
+    const f = focusRef.current
+    if (f) room = list[f.index]?.room ?? -1
+    else {
+      const look = cam.pose.a * g.rc + g.viewAngle.outer * g.rc
+      let best = Infinity
+      list.forEach((entry) => {
+        const distance = Math.abs(relative(entry.s) - look)
+        if (distance < best) { best = distance; room = entry.room }
+      })
+    }
+    if (room !== roomRef.current) {
+      roomRef.current = room
+      setRoomIndex(room)
+    }
+  }, [geometry, placed, relative])
+
+  // Restore the remembered position once the walk knows its own length.
   useEffect(() => {
     if (!geometry || motion.current.restored || placed.list.length === 0) return
     motion.current.restored = true
-    let start = placed.list[0].s - geometry.perimeter * 0.12
+    let start = placed.list[0].s - geometry.viewAngle.outer * geometry.rc
     if (storageKey) {
       try {
-        const saved = Number(window.sessionStorage.getItem(storageKey))
-        if (Number.isFinite(saved) && window.sessionStorage.getItem(storageKey) !== null) start = saved
+        const saved = window.sessionStorage.getItem(storageKey)
+        if (saved !== null && Number.isFinite(Number(saved))) start = Number(saved)
       } catch { /* storage can be unavailable; start at the beginning */ }
     }
     motion.current.offset = start
@@ -367,8 +270,14 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
       const dt = Math.min(64, now - last)
       last = now
       const m = motion.current
-      m.offset += (m.target - m.offset) * (1 - Math.exp(-dt / 95))
+      m.offset += (m.target - m.offset) * (1 - Math.exp(-dt / 120))
       if (Math.abs(m.target - m.offset) < 0.05) m.offset = m.target
+      const cam = camera.current
+      if (cam.flight) {
+        const t = Math.min(1, (now - cam.flight.start) / cam.flight.duration)
+        cam.pose = mixPose(cam.flight.from, cam.flight.to, ease(t))
+        if (t >= 1) cam.flight = null
+      }
       layout()
       frame = requestAnimationFrame(tick)
     }
@@ -378,64 +287,105 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
   }, [layout])
 
   useEffect(() => () => {
-    if (!storageKey) return
+    // Nothing to remember until the walk has been placed (React may mount twice in development).
+    if (!storageKey || !motion.current.restored) return
     try { window.sessionStorage.setItem(storageKey, String(motion.current.target)) } catch { /* ignore */ }
   }, [storageKey])
 
-  const step = geometry ? geometry.itemHeight * 0.66 + geometry.gap : 300
+  const remember = () => {
+    if (!storageKey || !motion.current.restored) return
+    try { window.sessionStorage.setItem(storageKey, String(motion.current.target)) } catch { /* ignore */ }
+  }
+
+  /** The pointer label only follows real pointer moves; when the room moves under it, it goes. */
+  const hidePill = () => pillRef.current?.classList.remove('is-on')
+
+  const fly = (to: Pose, duration: number) => {
+    hidePill()
+    const cam = camera.current
+    cam.flight = { from: cam.pose, to, start: performance.now(), duration: reducedMotion() ? 1 : duration }
+  }
+
+  /** Steps back into the middle of the corridor, facing along it, from wherever the camera got to. */
+  const unfocus = useCallback(() => {
+    const g = geometry
+    if (!g || !focusRef.current) return
+    focusRef.current = null
+    setFocused(false)
+    // Walking on to where the camera stands, so stepping back does not walk it back too.
+    const cam = camera.current
+    const turn = cam.pose.a
+    motion.current.offset += turn * g.rc
+    motion.current.target = motion.current.offset
+    cam.pose = { r: cam.pose.r, a: 0, yaw: cam.pose.yaw + turn }
+    cam.flight = null
+    fly(g.rest, 820)
+  }, [geometry])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && focusRef.current) unfocus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [unfocus])
 
   useEffect(() => {
     const stage = stageRef.current
-    if (!stage) return
+    if (!stage || !geometry) return
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       if (motion.current.opening) return
+      hidePill()
       if (focusRef.current) { unfocus(); return }
+      // Still stepping back from a piece: let the camera land first.
+      if (camera.current.flight) return
       const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1
-      motion.current.target += (event.deltaY + event.deltaX) * scale * 1.25
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+      motion.current.target += delta * scale * (geometry.d / 260)
     }
     stage.addEventListener('wheel', onWheel, { passive: false })
     return () => stage.removeEventListener('wheel', onWheel)
-  }, [unfocus])
+  }, [unfocus, geometry])
 
-  const nearestTarget = (s: number) => {
+  /** The walk position that puts a slot where the eye rests on its wall. */
+  const viewTarget = (entry: Placed) => {
+    const g = geometry
+    if (!g) return motion.current.target
     const { total } = placed
+    const s = entry.s - g.viewAngle[entry.wall] * g.rc
     const current = motion.current.target
     return s + Math.round((current - s) / total) * total
   }
 
-  const remember = () => {
-    if (!storageKey) return
-    try { window.sessionStorage.setItem(storageKey, String(motion.current.target)) } catch { /* ignore */ }
-  }
-
-  /** Second step: the brought-forward piece glides into the detail page's image slot. */
+  /** Second step: the piece being looked at glides into the detail page's image slot. */
   const openFocused = () => {
     const f = focusRef.current
     const stage = stageRef.current
-    if (!f || !stage || motion.current.opening) return
-    focusRef.current = null
+    const entry = f ? placed.list[f.index] : null
+    const element = f ? itemRefs.current[f.index] : null
+    const art = element?.querySelector<HTMLElement>('.gw-art')
+    if (!f || !stage || !entry || !art || motion.current.opening) return
     motion.current.opening = true
     remember()
-    const { ghost } = f
-    ghost.classList.remove('is-focused', 'is-lifting')
-    ghost.style.transform = 'none'
+    const from = art.getBoundingClientRect()
+    const ghost = makeGhost(art)
+    place(ghost, { x: from.left, y: from.top, w: from.width, h: from.height })
+    document.body.appendChild(ghost)
+    ghost.getBoundingClientRect()
+    element?.classList.add('is-lifted')
     ghost.classList.add('is-moving')
-    ghost.blur()
-    place(ghost, detailFrame(f.item.aspect))
-    stage.classList.remove('is-focused')
+    place(ghost, detailFrame(entry.item.aspect))
     stage.classList.add('is-leaving')
     handOff(ghost)
-    window.setTimeout(() => onOpen(f.item), 600)
+    window.setTimeout(() => onOpen(entry.item), 600)
   }
 
-  /** First step: the camera leans in and the piece comes forward to the middle of the room. */
+  /** First step: the visitor turns and steps over to look at the piece. */
   const focusOn = (index: number) => {
+    const g = geometry
     const entry = placed.list[index]
-    const element = itemRefs.current[index]
-    const stage = stageRef.current
-    const art = element?.querySelector<HTMLElement>('.gw-art')
-    if (!entry || !element || !stage || !art || motion.current.opening || focusRef.current) return
+    if (!g || !entry || motion.current.opening) return
     if (reducedMotion()) {
       motion.current.opening = true
       remember()
@@ -443,44 +393,97 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
       return
     }
     motion.current.target = motion.current.offset
-    const from = art.getBoundingClientRect()
-    const box = stage.getBoundingClientRect()
-    const frame = focusFrame(box, entry.item.aspect)
-    const touch = window.matchMedia('(pointer: coarse)').matches
-    const ghost = makeGhost(art, entry.item, frame, touch ? 'Tap to view · Tap the room to step back' : focusHint)
-    ghost.style.transform = mapOnto(from, frame)
-    ghost.addEventListener('click', openFocused)
-    document.body.appendChild(ghost)
-    ghost.getBoundingClientRect()
-    element.classList.add('is-lifted')
-    stage.style.setProperty('--gw-origin', `${from.left + from.width / 2 - box.left}px ${from.top + from.height / 2 - box.top}px`)
-    stage.classList.add('is-focused')
-    focusRef.current = { index, item: entry.item, element, ghost, from, frame }
-    requestAnimationFrame(() => {
-      ghost.classList.add('is-lifting', 'is-focused')
-      ghost.style.transform = 'none'
+    const theta = relative(entry.s) / g.rc
+    focusRef.current = { index, theta }
+    setFocused(true)
+    const cam = camera.current
+    const distance = Math.hypot(cam.pose.a - theta, (cam.pose.r - g.rc) / g.rc)
+    fly(focusPose(g, entry.wall, theta, entry.width, entry.height), Math.min(1250, 850 + distance * 500))
+    const element = itemRefs.current[index]
+    window.setTimeout(() => { if (focusRef.current?.index === index) element?.focus({ preventScroll: true }) }, 400)
+  }
+
+  /** The next piece along the walk from a slot (or from where the eye rests), on either wall. */
+  const neighbour = (direction: 1 | -1, from?: number) => {
+    const g = geometry
+    if (!g) return -1
+    const base = from ?? camera.current.pose.a * g.rc + g.viewAngle.outer * g.rc
+    let best = -1
+    let bestDistance = Infinity
+    placed.list.forEach((entry, index) => {
+      if (entry.item.kind === 'placard') return
+      const gap = (relative(entry.s) - base) * direction
+      if (gap > 1 && gap < bestDistance) { bestDistance = gap; best = index }
     })
-    window.setTimeout(() => { if (focusRef.current?.ghost === ghost) ghost.focus({ preventScroll: true }) }, 320)
+    return best
+  }
+
+  const step = (direction: 1 | -1) => {
+    if (motion.current.opening) return
+    hidePill()
+    const f = focusRef.current
+    if (f) {
+      const next = neighbour(direction, relative(placed.list[f.index].s))
+      if (next >= 0) focusOn(next)
+      return
+    }
+    if (camera.current.flight) return
+    const g = geometry
+    if (!g) return
+    // Walk so the next piece along comes to rest where the eye falls.
+    const look = motion.current.target + g.viewAngle.outer * g.rc
+    let best = Infinity
+    let target = motion.current.target + direction * (g.gap + g.itemHeight * 0.66) / 2
+    placed.list.forEach((entry) => {
+      if (entry.wall !== 'outer') return
+      const view = viewTarget(entry)
+      const gap = (view + g.viewAngle.outer * g.rc - look) * direction
+      if (gap > 2 && gap < best) { best = gap; target = view }
+    })
+    motion.current.target = target
   }
 
   const onPointerDown = (event: React.PointerEvent) => {
     if (event.button !== 0 || motion.current.opening) return
+    const onItem = (event.target as Element).closest('.gw-item')
     if (focusRef.current) {
-      // Touching the room while a piece is forward steps back out.
-      unfocus()
-      swallowNextClick()
+      // Touching the room while looking at a piece steps back out; touching a piece looks at that one.
+      if (!onItem) { unfocus(); swallowNextClick() }
       return
     }
+    if (camera.current.flight) return
     drag.current = { x: event.clientX, target: motion.current.target, moved: false, lastX: event.clientX, lastT: performance.now(), velocity: 0 }
   }
 
+  /** How far the walk moves per pixel dragged, so the wall roughly follows the finger. */
+  const dragScale = geometry ? (geometry.d * 5) / geometry.f : 5
+
+  const showPill = (event: React.PointerEvent) => {
+    const pill = pillRef.current
+    const stage = stageRef.current
+    if (!pill || !stage) return
+    const item = event.pointerType === 'mouse' && !drag.current?.moved ? (event.target as Element).closest<HTMLElement>('.gw-item') : null
+    const entry = item ? placed.list[itemRefs.current.indexOf(item as HTMLButtonElement)] : null
+    if (!entry || entry.item.kind === 'placard' || motion.current.opening) {
+      pill.classList.remove('is-on')
+      return
+    }
+    const f = focusRef.current
+    pill.textContent = f && placed.list[f.index] === entry ? openLabel : lookLabel
+    const box = stage.getBoundingClientRect()
+    pill.style.transform = `translate(${event.clientX - box.left + 16}px, ${event.clientY - box.top - 10}px)`
+    pill.classList.add('is-on')
+  }
+
   const onPointerMove = (event: React.PointerEvent) => {
+    showPill(event)
     const d = drag.current
     if (!d) return
     const dx = event.clientX - d.x
     if (!d.moved && Math.abs(dx) > 6) {
       d.moved = true
       setDragging(true)
+      pillRef.current?.classList.remove('is-on')
       stageRef.current?.setPointerCapture(event.pointerId)
     }
     if (!d.moved) return
@@ -489,7 +492,8 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
     d.velocity = d.velocity * 0.6 + ((event.clientX - d.lastX) / dt) * 0.4
     d.lastX = event.clientX
     d.lastT = now
-    motion.current.target = d.target - dx * 2.6
+    // Pulling the wall to the right walks forward, the way the pieces travel past.
+    motion.current.target = d.target + dx * dragScale
   }
 
   const endDrag = (event: React.PointerEvent) => {
@@ -498,7 +502,7 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
     if (!d) return
     if (d.moved) {
       // A little glide after a flick.
-      motion.current.target -= d.velocity * 2.6 * 260
+      motion.current.target += d.velocity * dragScale * 260
       setDragging(false)
       if (stageRef.current?.hasPointerCapture(event.pointerId)) stageRef.current.releasePointerCapture(event.pointerId)
       swallowNextClick()
@@ -507,73 +511,96 @@ export default function GalleryWall({ items, onOpen, storageKey, hint = 'Scroll 
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (motion.current.opening) return
-    if (focusRef.current && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) unfocus()
-    if (event.key === 'ArrowRight') { motion.current.target += step; event.preventDefault() }
-    if (event.key === 'ArrowLeft') { motion.current.target -= step; event.preventDefault() }
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { step(1); event.preventDefault() }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { step(-1); event.preventDefault() }
   }
+
+  const rest = useMemo(() => (geometry ? drawRoom(geometry, geometry.rest) : null), [geometry])
+  const currentRoom = roomIndex >= 0 ? items[roomIndex] : undefined
+  const lines = (focused ? (coarsePointer() ? focusHint.replace(/\bclick/g, 'tap').replace(/\bClick/g, 'Tap') : focusHint) : hint).split(' · ')
 
   return (
     <div
       ref={stageRef}
-      className={`gw-stage${dragging ? ' is-dragging' : ''}`}
+      className={`gw-stage${dragging ? ' is-dragging' : ''}${focused ? ' is-focused' : ''}`}
       tabIndex={0}
       role="region"
-      aria-label="Gallery wall. Use the arrow keys or scroll to move along the wall."
+      aria-label="Gallery corridor. Use the arrow keys or scroll to walk along it."
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
+      onPointerLeave={() => pillRef.current?.classList.remove('is-on')}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onKeyDown={onKeyDown}
     >
       <div className="gw-zoom">
-        {geometry && paths && <svg className="gw-room" viewBox={`0 0 ${geometry.width} ${geometry.height}`} aria-hidden="true">
+        {geometry && rest && <svg className="gw-room" viewBox={`0 0 ${geometry.width} ${geometry.height}`} aria-hidden="true">
           <defs>
-            <linearGradient id="gw-wall" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="gw-wall" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2={geometry.height}>
               <stop offset="0" style={{ stopColor: 'var(--gw-wall-a)' }} /><stop offset="0.6" style={{ stopColor: 'var(--gw-wall-b)' }} /><stop offset="1" style={{ stopColor: 'var(--gw-wall-c)' }} />
             </linearGradient>
-            <linearGradient id="gw-ceiling" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="gw-ceiling" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2={geometry.horizon}>
               <stop offset="0" style={{ stopColor: 'var(--gw-ceiling-a)' }} /><stop offset="1" style={{ stopColor: 'var(--gw-ceiling-b)' }} />
             </linearGradient>
-            <linearGradient id="gw-floor" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="gw-floor" gradientUnits="userSpaceOnUse" x1="0" y1={geometry.horizon} x2="0" y2={geometry.height}>
               <stop offset="0" style={{ stopColor: 'var(--gw-floor-a)' }} /><stop offset="1" style={{ stopColor: 'var(--gw-floor-b)' }} />
             </linearGradient>
-            <filter id="gw-soft" x="-5%" y="-50%" width="110%" height="200%"><feGaussianBlur stdDeviation="6" /></filter>
+            <linearGradient id="gw-inner" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2={geometry.width * 0.3} y2="0">
+              <stop offset="0" style={{ stopColor: 'var(--gw-inner-b)' }} /><stop offset="1" style={{ stopColor: 'var(--gw-inner-a)' }} />
+            </linearGradient>
+            <filter id="gw-soft" x="-5%" y="-50%" width="110%" height="200%"><feGaussianBlur stdDeviation="7" /></filter>
+            <filter id="gw-soft-edge" x="-50%" y="-5%" width="200%" height="110%"><feGaussianBlur stdDeviation="3" /></filter>
           </defs>
           <rect width={geometry.width} height={geometry.height} fill="url(#gw-wall)" />
-          <path d={paths.ceilingFill} fill="url(#gw-ceiling)" />
-          <path d={paths.floorFill} fill="url(#gw-floor)" />
-          <path d={paths.floor} fill="none" style={{ stroke: 'var(--gw-floor-line)' }} strokeWidth="10" filter="url(#gw-soft)" />
-          <path d={paths.ceiling} fill="none" style={{ stroke: 'var(--gw-ceiling-line)' }} strokeWidth="14" filter="url(#gw-soft)" />
+          <path ref={(el) => { roomRefs.current.ceilingFill = el }} d={rest.ceilingFill} fill="url(#gw-ceiling)" />
+          <path ref={(el) => { roomRefs.current.floorFill = el }} d={rest.floorFill} fill="url(#gw-floor)" />
+          <path ref={(el) => { roomRefs.current.floorLine = el }} d={rest.floorLine} fill="none" style={{ stroke: 'var(--gw-floor-line)' }} strokeWidth="12" filter="url(#gw-soft)" />
+          <path ref={(el) => { roomRefs.current.ceilingLine = el }} d={rest.ceilingLine} fill="none" style={{ stroke: 'var(--gw-ceiling-line)' }} strokeWidth="16" filter="url(#gw-soft)" />
+          <path ref={(el) => { roomRefs.current.innerFill = el }} d={rest.innerFill} fill="url(#gw-inner)" />
+          <path ref={(el) => { roomRefs.current.innerEdge = el }} d={rest.innerEdge} fill="none" style={{ stroke: 'var(--gw-edge)' }} strokeWidth="4" filter="url(#gw-soft-edge)" />
         </svg>}
-        {geometry && <div className="gw-scene" style={{ perspective: `${geometry.f}px`, perspectiveOrigin: `50% ${geometry.horizon}px` }}>
-          <div className="gw-anchor" style={{ top: geometry.horizon }}>
-            {placed.list.map((entry, index) => (
-              <button
-                key={entry.key}
-                ref={(element) => { itemRefs.current[index] = element }}
-                type="button"
-                className={`gw-item${entry.item.kind === 'placard' ? ' is-placard' : ''}`}
-                style={{ width: entry.width, height: entry.height, fontSize: entry.height * 0.045 }}
-                aria-label={entry.item.label}
-                aria-hidden={entry.copy > 0 || undefined}
-                tabIndex={entry.copy > 0 ? -1 : 0}
-                onFocus={() => { if (!motion.current.opening && !drag.current && !focusRef.current) motion.current.target = nearestTarget(entry.s) }}
-                onClick={() => {
-                  if (entry.item.kind === 'placard') motion.current.target = nearestTarget(entry.s)
-                  else focusOn(index)
-                }}
-              >
-                <span className="gw-art">{entry.item.content}</span>
-                {entry.item.caption && <span className="gw-cap">
-                  <span>{entry.item.caption[0]}</span>
-                  {entry.item.caption[1] && <em>{entry.item.caption[1]}</em>}
-                </span>}
-              </button>
-            ))}
-          </div>
+        {geometry && <div className="gw-scene" style={{ perspective: `${geometry.f}px`, perspectiveOrigin: `${geometry.cx}px ${geometry.horizon}px` }}>
+          {placed.list.map((entry, index) => (
+            <button
+              key={entry.key}
+              ref={(element) => { itemRefs.current[index] = element }}
+              type="button"
+              className={`gw-item${entry.item.kind === 'placard' ? ' is-placard' : ''}`}
+              style={{ width: entry.width, height: entry.height, fontSize: geometry.itemHeight * (entry.item.kind === 'placard' ? 0.036 : 0.045) }}
+              aria-label={entry.item.label}
+              aria-hidden={entry.copy > 0 || undefined}
+              tabIndex={entry.copy > 0 ? -1 : 0}
+              onFocus={() => { if (!motion.current.opening && !drag.current && !focusRef.current && !camera.current.flight) motion.current.target = viewTarget(entry) }}
+              onClick={() => {
+                if (motion.current.opening) return
+                if (entry.item.kind === 'placard') {
+                  if (focusRef.current) unfocus()
+                  else motion.current.target = viewTarget(entry)
+                } else if (focusRef.current?.index === index) openFocused()
+                else focusOn(index)
+              }}
+            >
+              <span className="gw-art">{entry.item.content}</span>
+              {entry.item.caption && <span className="gw-cap">
+                <span>{entry.item.caption[0]}</span>
+                {entry.item.caption[1] && <em>{entry.item.caption[1]}</em>}
+              </span>}
+            </button>
+          ))}
         </div>}
       </div>
-      {hint && <p className="gw-hint">{hint}</p>}
+      <span ref={pillRef} className="gw-pill" aria-hidden="true" />
+      {currentRoom && <div className="gw-roomcap">
+        <small>{walkingLabel}</small>
+        <strong>{currentRoom.title ?? currentRoom.label}</strong>
+        {currentRoom.onEnter && <button type="button" onClick={(event) => { event.stopPropagation(); currentRoom.onEnter?.() }} onPointerDown={(event) => event.stopPropagation()}>{enterLabel} →</button>}
+      </div>}
+      <div className="gw-controls" onPointerDown={(event) => event.stopPropagation()}>
+        <p>{lines.map((line) => <span key={line}>{line}</span>)}</p>
+        <button type="button" aria-label={focused ? 'Previous piece' : 'Walk back'} onClick={() => step(-1)}><span aria-hidden="true">‹</span></button>
+        <button type="button" aria-label={focused ? 'Next piece' : 'Walk on'} onClick={() => step(1)}><span aria-hidden="true">›</span></button>
+      </div>
     </div>
   )
 }
+

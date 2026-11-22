@@ -85,6 +85,12 @@ export default function LibraryCatalog({ samples }: { samples: SampleShelfBook[]
     window.history.replaceState(null, '', url)
   }
 
+  /** "Enter the collection": the list view, scrolled to that shelf. */
+  function enterShelf(key: string) {
+    changeView('list')
+    window.setTimeout(() => document.getElementById(`shelf-${key}`)?.scrollIntoView({ block: 'start' }), 60)
+  }
+
   const shelves = useMemo<Shelf[]>(() => {
     const needle = search.trim().toLowerCase()
     const matches = (title: string, author: string) => !needle || title.toLowerCase().includes(needle) || author.toLowerCase().includes(needle)
@@ -113,6 +119,8 @@ export default function LibraryCatalog({ samples }: { samples: SampleShelfBook[]
       kind: 'placard' as const,
       aspect: 0.64,
       label: `${shelf.title}: ${shelf.books.length} ${shelf.books.length === 1 ? 'book' : 'books'}`,
+      title: shelf.title,
+      onEnter: () => enterShelf(shelf.key),
       content: <span className="gs-placard"><strong>{shelf.title}</strong><span>{shelf.blurb}</span><small>{shelf.books.length} {shelf.books.length === 1 ? 'book' : 'books'}</small></span>
     },
     ...shelf.books.map((book) => ({
@@ -122,6 +130,7 @@ export default function LibraryCatalog({ samples }: { samples: SampleShelfBook[]
       caption: [book.author, book.title] as [string, string],
       content: <BookCover title={book.title} author={book.author} tag={book.tag} />
     }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- enterShelf only uses state setters
   ]), [shelves])
 
   const memes = published.posts.filter((post) => post.kind === 'meme')
@@ -145,14 +154,16 @@ export default function LibraryCatalog({ samples }: { samples: SampleShelfBook[]
             ? <GalleryWall
               items={wallItems}
               storageKey="libra.wall"
-              hint="Scroll or drag to walk the shelves · Click a book to open it"
+              hint="Scroll or drag to walk the shelves · Click a book to look closer"
+              focusHint="Click the book to open it · Scroll or click away to step back"
+              openLabel="Open the book"
               onOpen={(item) => router.push(`/book/${item.key.replace(/^book-/, '')}`)}
             />
             : <p className="gs-empty" style={{ paddingTop: 140 }}>No books match “{search}”.</p>}
         </section>
         : <section className="gs-list" aria-label="Library list">
           {shelves.map((shelf) => (
-            <div key={shelf.key} className="gs-list-section">
+            <div key={shelf.key} id={`shelf-${shelf.key}`} className="gs-list-section">
               <div className="gs-list-heading"><h2>{shelf.title}</h2><p>{shelf.blurb}</p></div>
               <div className="gs-grid">
                 {shelf.books.map((book) => (
