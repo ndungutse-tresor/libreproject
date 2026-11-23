@@ -1,13 +1,13 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getPool } from '@/lib/db'
 import { getSessionUserId } from '@/lib/session'
 import AdminAccessDenied from '../AdminAccessDenied'
+import DelegatedHome from '../glass/DelegatedHome'
 
 const sections = [
-  { permission: 'users', href: '/admin/users', title: 'Members', description: 'Manage member access and the accounts you are authorized to support.', icon: '♙' },
-  { permission: 'payments', href: '/admin/orders', title: 'Orders & platform settings', description: 'Review transactions and manage the settings granted to your account.', icon: '◇' },
-  { permission: 'content', href: '/admin/content', title: 'Publishing', description: 'Review submissions and manage approved content.', icon: '✎' }
+  { permission: 'users', href: '/admin/users', title: 'Members', description: 'Manage member access and the accounts you are authorized to support.', icon: 'users', unit: 'writers to approve' },
+  { permission: 'payments', href: '/admin/orders', title: 'Orders & platform settings', description: 'Review transactions and manage the settings granted to your account.', icon: 'receipt', unit: 'pending orders' },
+  { permission: 'content', href: '/admin/content', title: 'Publishing', description: 'Review submissions and manage approved content.', icon: 'review', unit: 'waiting for review' }
 ] as const
 
 export default async function DelegatedAdminHomePage() {
@@ -24,11 +24,10 @@ export default async function DelegatedAdminHomePage() {
   } catch (error) {
     console.error('Unable to load delegated admin dashboard:', error)
     return (
-      <section className="admin-error-panel">
-        <p className="admin-eyebrow">DASHBOARD UNAVAILABLE</p>
-        <h1>We couldn’t load your workspace.</h1>
-        <p>Check the database connection and try again.</p>
-      </section>
+      <div className="ga-empty" role="alert">
+        <strong>We couldn’t load your workspace.</strong>
+        <span>Check the database connection and try again.</span>
+      </div>
     )
   }
 
@@ -38,27 +37,18 @@ export default async function DelegatedAdminHomePage() {
   }
 
   const accessibleSections = sections.filter((section) => profile.perms.includes(section.permission))
-  return (
-    <div className="admin-dashboard admin-delegated-dashboard">
-      <section className="admin-welcome">
-        <div>
-          <p className="admin-eyebrow">YOUR ADMIN WORKSPACE</p>
-          <h1>Welcome, {profile.name}.</h1>
-          <p>Your workspace only includes the areas the super administrator has granted to your account.</p>
-        </div>
-      </section>
-      <section className="admin-delegated-sections" aria-label="Your permitted admin sections">
-        {accessibleSections.map((section) => (
-          <Link className="admin-delegated-section" href={section.href} key={section.permission}>
-            <span className="admin-shortcut-icon" aria-hidden="true">{section.icon}</span>
-            <span><strong>{section.title}</strong><small>{section.description}</small></span>
-            <span className="admin-delegated-arrow" aria-hidden="true">→</span>
-          </Link>
-        ))}
-        {accessibleSections.length === 0 && (
-          <p className="admin-permission-note">No admin sections have been assigned to your account yet. Contact the super administrator if you need access.</p>
-        )}
-      </section>
-    </div>
-  )
+  let waiting: Record<string, number> = {}
+  try {
+    const { rows } = await getPool().query(
+      `SELECT
+         (SELECT count(*) FROM profiles WHERE account_type = 'writer' AND writer_status = 'pending')::int AS users,
+         (SELECT count(*) FROM orders WHERE status = 'pending')::int AS payments,
+         (SELECT count(*) FROM content_submissions WHERE status = 'pending')::int AS content`
+    )
+    waiting = rows[0]
+  } catch (error) {
+    console.error('Unable to load delegated admin counts:', error)
+  }
+
+  return <DelegatedHome name={profile.name.trim().split(/\s+/)[0] || profile.name} sections={accessibleSections.map((section) => ({ ...section, waiting: waiting[section.permission] ?? 0 }))} />
 }

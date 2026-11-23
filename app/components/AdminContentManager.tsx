@@ -1,6 +1,9 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
+import BookCover from './gallery/BookCover'
+import { GaIcon, Segmented, StatCard, initials, rise } from '../admin/glass/GlassKit'
 
 type SubmissionStatus = 'pending' | 'approved' | 'rejected'
 type ContentFilter = 'all' | SubmissionStatus
@@ -30,18 +33,20 @@ type ModerationResult = {
   summary: { total: number; pending: number; approved: number; rejected: number }
 }
 
-const FILTERS: { value: ContentFilter; label: string }[] = [
-  { value: 'all', label: 'All work' },
-  { value: 'pending', label: 'Awaiting review' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Declined' }
-]
+const STATUS_CHIP = { pending: ['is-amber', 'In review'], approved: ['is-green', 'Approved'], rejected: ['is-red', 'Declined'] } as const
+const KIND_ICON = { book: 'book', meme: 'image', quote: 'quote' } as const
+
+function ago(value: string) {
+  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86_400_000)
+  return days <= 0 ? 'today' : days === 1 ? 'yesterday' : days < 30 ? `${days} days ago` : new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 function submissionEnabled(item: Submission) {
   return item.kind === 'book' ? item.book_enabled === true : item.post_enabled === true
 }
 
 export default function AdminContentManager() {
+  const router = useRouter()
   const [result, setResult] = useState<ModerationResult | null>(null)
   const [filter, setFilter] = useState<ContentFilter>('all')
   const [loading, setLoading] = useState(true)
@@ -88,6 +93,8 @@ export default function AdminContentManager() {
       }
       setNotice(messages[action])
       await loadSubmissions()
+      // Refresh the waiting counts beside the navigation.
+      router.refresh()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to update this submission.')
     } finally {
@@ -117,81 +124,106 @@ export default function AdminContentManager() {
     }
   }
 
+  const summary = result?.summary
+
   return (
     <div className="admin-content-page">
-      <section className="admin-page-heading">
-        <div>
-          <p className="admin-eyebrow">WRITERS &amp; COMMUNITY</p>
+      <header className="ga-head">
+        <div {...rise(0)}>
           <h1>Publishing</h1>
-          <p>Review books, memes, and quotes before they appear in the reader library.</p>
+          <p>Every book, meme and quote a writer sends is checked here before readers see it</p>
         </div>
-        <button className="admin-secondary-button" type="button" onClick={() => void loadSubmissions()} disabled={loading}>
-          <span aria-hidden="true">↻</span> {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
-      </section>
+        <div {...rise(1, 'ga-head-actions')}>
+          <button className="ga-button" type="button" onClick={() => void loadSubmissions()} disabled={loading}><GaIcon name="refresh" /> {loading ? 'Refreshing…' : 'Refresh'}</button>
+          <button className="ga-button is-dark" type="button" onClick={() => setFilter('pending')}><GaIcon name="check" /> Show what’s waiting</button>
+        </div>
+      </header>
 
-      {result && <section className="admin-content-stats" aria-label="Publishing overview">
-        <article><span>All submissions</span><strong>{result.summary.total.toLocaleString()}</strong></article>
-        <article className="is-review"><span>Awaiting review</span><strong>{result.summary.pending.toLocaleString()}</strong></article>
-        <article className="is-approved"><span>Approved work</span><strong>{result.summary.approved.toLocaleString()}</strong></article>
-        <article><span>Declined</span><strong>{result.summary.rejected.toLocaleString()}</strong></article>
-      </section>}
+      {summary && <div className="ga-grid is-four" aria-label="Publishing overview">
+        <StatCard index={2} icon="layers" value={summary.total} label="All submissions" sub="Books, memes and quotes" onClick={() => setFilter('all')} pressed={filter === 'all'} />
+        <StatCard index={3} icon="clock" value={summary.pending} label="Waiting for review" sub="Oldest first is fairest" onClick={() => setFilter('pending')} pressed={filter === 'pending'} />
+        <StatCard index={4} icon="check" value={summary.approved} label="Approved" sub="Published to the library" onClick={() => setFilter('approved')} pressed={filter === 'approved'} />
+        <StatCard index={5} icon="x" value={summary.rejected} label="Declined" sub="Sent back to the writer" onClick={() => setFilter('rejected')} pressed={filter === 'rejected'} />
+      </div>}
 
-      <section className="admin-panel admin-content-panel">
-        <div className="admin-content-toolbar">
-          <div><h2>Writer submissions</h2><p>Approve to publish or decline work that is not ready to share.</p></div>
-        </div>
-        <div className="admin-content-filters" aria-label="Filter submissions">
-          {FILTERS.map((item) => <button key={item.value} type="button" className={filter === item.value ? 'is-selected' : ''} aria-pressed={filter === item.value} onClick={() => setFilter(item.value)}>
-            {item.label}{item.value === 'pending' && result && <span>{result.summary.pending}</span>}
-          </button>)}
-        </div>
-        {error && <p className="admin-inline-error" role="alert">{error}</p>}
-        {notice && <p className="admin-inline-success" role="status">{notice}</p>}
-        <div className="admin-submission-list" aria-busy={loading}>
-          {result?.submissions.map((submission) => {
-            const busy = busyId === submission.id
-            const enabled = submissionEnabled(submission)
-            const fileUrl = `/api/admin/content/file?id=${encodeURIComponent(submission.id)}`
-            return <article className="admin-submission-card" key={submission.id}>
-              <div className={`admin-submission-kind is-${submission.kind}`} aria-hidden="true">{submission.kind === 'book' ? '▤' : submission.kind === 'meme' ? '☺' : '“'}</div>
-              <div className="admin-submission-main">
-                <header className="admin-submission-heading">
-                  <div><span className="admin-content-type">{submission.kind}</span><h3>{submission.title}</h3></div>
-                  <span className={`admin-submission-status is-${submission.status}`}>{submission.status === 'pending' ? 'Awaiting review' : submission.status}</span>
-                </header>
-                {submission.kind === 'book' && submission.status === 'approved' && <div className="admin-book-title-editor">
-                  {editingBookId === submission.id ? <>
-                    <label>Book cover title
-                      <input value={bookTitleDraft} onChange={(event) => setBookTitleDraft(event.target.value)} maxLength={160} />
-                    </label>
-                    <button className="admin-content-approve" type="button" onClick={() => void saveBookTitle(submission)} disabled={busy}>{busy ? 'Saving…' : 'Save title'}</button>
-                    <button className="admin-content-toggle" type="button" onClick={() => setEditingBookId('')} disabled={busy}>Cancel</button>
-                  </> : <button className="admin-content-toggle" type="button" onClick={() => { setEditingBookId(submission.id); setBookTitleDraft(submission.title) }}>Edit cover title</button>}
-                </div>}
-                <p className="admin-submission-writer">By <strong>{submission.writer_name}</strong> · {submission.writer_email} · {new Date(submission.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</p>
-                {submission.kind === 'book' && submission.author && <p className="admin-submission-detail">Book author: {submission.author}</p>}
-                {submission.kind === 'quote' && submission.attribution && <p className="admin-submission-detail">Attribution: {submission.attribution}</p>}
-                {submission.body && <p className={`admin-submission-body ${submission.kind === 'quote' ? 'is-quote' : ''}`}>{submission.body}</p>}
-                {submission.file_name && <a className="admin-submission-file" href={fileUrl} target="_blank" rel="noreferrer"><span aria-hidden="true">{submission.mime_type?.startsWith('image/') ? '▧' : '↗'}</span>{submission.file_name} <span>Preview file</span></a>}
-                {submission.kind === 'meme' && submission.mime_type?.startsWith('image/') && <img className="admin-submission-image" src={fileUrl} alt={submission.title} />}
-                <footer className="admin-submission-actions">
-                  {submission.status === 'pending' && <>
-                    <button className="admin-content-approve" type="button" onClick={() => void moderate(submission, 'approve')} disabled={busy}>{busy ? 'Saving…' : 'Approve & publish'}</button>
-                    <button className="admin-content-reject" type="button" onClick={() => void moderate(submission, 'reject')} disabled={busy}>Decline</button>
-                  </>}
-                  {submission.status === 'approved' && <button className="admin-content-toggle" type="button" onClick={() => void moderate(submission, enabled ? 'disable' : 'enable')} disabled={busy}>{busy ? 'Saving…' : enabled ? 'Disable from library' : 'Enable in library'}</button>}
-                  {submission.reviewed_at && <span>Reviewed {new Date(submission.reviewed_at).toLocaleDateString()}</span>}
-                </footer>
+      <div {...rise(6, 'ga-toolbar')} style={{ ...rise(6).style, marginTop: 16 }}>
+        <Segmented<ContentFilter>
+          label="Filter submissions"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: 'all', label: 'All work', count: summary?.total },
+            { value: 'pending', label: 'In review', count: summary?.pending },
+            { value: 'approved', label: 'Approved', count: summary?.approved },
+            { value: 'rejected', label: 'Declined', count: summary?.rejected }
+          ]}
+        />
+      </div>
+      {error && <p className="ga-notice is-error" role="alert"><GaIcon name="alert" />{error}</p>}
+      {notice && <p className="ga-notice is-success" role="status"><GaIcon name="check" />{notice}</p>}
+
+      <div className="ga-grid is-tiles" aria-busy={loading}>
+        {result?.submissions.map((submission, index) => {
+          const busy = busyId === submission.id
+          const enabled = submissionEnabled(submission)
+          const fileUrl = `/api/admin/content/file?id=${encodeURIComponent(submission.id)}`
+          const isImage = submission.mime_type?.startsWith('image/')
+          const [tone, statusLabel] = STATUS_CHIP[submission.status]
+          return (
+            <article key={submission.id} {...rise(7 + Math.min(index, 8), 'ga-card ga-tile is-lift')}>
+              <div className="ga-tile-media">
+                {submission.kind === 'meme' && isImage
+                  ? <img src={fileUrl} alt={submission.title} loading="lazy" />
+                  : submission.kind === 'quote'
+                    ? <div className="ga-tile-art ga-tile-quote"><blockquote>“{(submission.body ?? submission.title).slice(0, 140)}{(submission.body ?? '').length > 140 ? '…' : ''}”</blockquote></div>
+                    : <div className="ga-tile-art"><span className="ga-tile-cover"><BookCover title={submission.title} author={submission.author} /></span></div>}
+                <span className={`ga-chip is-glass`}><span className={`ga-pip ga-pip-${tone}`} />{statusLabel}</span>
+                <span className="ga-chip is-glass"><GaIcon name={KIND_ICON[submission.kind]} />{submission.kind}</span>
               </div>
+              <div className="ga-tile-body">
+                <h3>{submission.title}</h3>
+                {submission.kind === 'book' && submission.author && <p>Book author: {submission.author}</p>}
+                {submission.kind === 'quote' && submission.attribution && <p>Attribution: {submission.attribution}</p>}
+                {submission.kind !== 'quote' && submission.body && <p className="ga-clamp">{submission.body}</p>}
+                <div className="ga-person">
+                  <span className="ga-avatar">{initials(submission.writer_name)}</span>
+                  <div><strong>{submission.writer_name}</strong><small>{submission.writer_email} · {ago(submission.created_at)}</small></div>
+                </div>
+                <div className="ga-tile-tags">
+                  {submission.file_name && <a className="ga-chip is-blue" href={fileUrl} target="_blank" rel="noreferrer"><GaIcon name={isImage ? 'image' : 'external'} />{submission.file_name}</a>}
+                  {submission.status === 'approved' && <span className={`ga-chip ${enabled ? 'is-green' : ''}`}>{enabled ? 'Visible in the library' : 'Hidden from the library'}</span>}
+                  {submission.reviewed_at && <span className="ga-chip">Reviewed {new Date(submission.reviewed_at).toLocaleDateString()}</span>}
+                </div>
+                {submission.kind === 'book' && submission.status === 'approved' && editingBookId === submission.id && (
+                  <label className="ga-field" style={{ marginTop: 10 }}>Book cover title
+                    <input className="ga-input" value={bookTitleDraft} onChange={(event) => setBookTitleDraft(event.target.value)} maxLength={160} />
+                  </label>
+                )}
+              </div>
+              <footer className="ga-tile-actions">
+                {submission.status === 'pending' && <>
+                  <button className="ga-button is-danger" type="button" onClick={() => void moderate(submission, 'reject')} disabled={busy}><GaIcon name="x" /> Decline</button>
+                  <button className="ga-button is-dark" type="button" onClick={() => void moderate(submission, 'approve')} disabled={busy}><GaIcon name="check" /> {busy ? 'Saving…' : 'Approve'}</button>
+                </>}
+                {submission.status === 'approved' && (editingBookId === submission.id ? <>
+                  <button className="ga-button" type="button" onClick={() => setEditingBookId('')} disabled={busy}>Cancel</button>
+                  <button className="ga-button is-dark" type="button" onClick={() => void saveBookTitle(submission)} disabled={busy}>{busy ? 'Saving…' : 'Save title'}</button>
+                </> : <>
+                  {submission.kind === 'book'
+                    ? <button className="ga-button" type="button" onClick={() => { setEditingBookId(submission.id); setBookTitleDraft(submission.title) }}><GaIcon name="review" /> Edit title</button>
+                    : <a className="ga-button" href={fileUrl} target="_blank" rel="noreferrer"><GaIcon name="eye" /> Review</a>}
+                  <button className={`ga-button${enabled ? '' : ' is-dark'}`} type="button" onClick={() => void moderate(submission, enabled ? 'disable' : 'enable')} disabled={busy}>{busy ? 'Saving…' : enabled ? 'Hide' : 'Show'}</button>
+                </>)}
+                {submission.status === 'rejected' && <span className="ga-tile-note">Declined. The writer can send a new version.</span>}
+              </footer>
             </article>
-          })}
-          {!loading && result?.submissions.length === 0 && <div className="admin-content-empty"><span aria-hidden="true">✦</span><h3>{filter === 'pending' ? 'You’re all caught up.' : 'No submissions here yet.'}</h3><p>{filter === 'pending' ? 'New writer work will appear here for review.' : 'Writer submissions will appear here when they are sent.'}</p></div>}
-          {loading && !result && <div className="admin-content-empty">Loading submissions…</div>}
-          {error && !result && <div className="admin-content-empty">Submission queue could not be loaded.</div>}
-        </div>
-      </section>
-      <p className="admin-content-note"><span aria-hidden="true">ⓘ</span> Writers need admin approval before they can submit. Every book, meme, and quote needs a separate review before publication.</p>
+          )
+        })}
+      </div>
+      {!loading && result?.submissions.length === 0 && <div {...rise(7, 'ga-card ga-empty')}><GaIcon name="sparkles" size={22} /><strong>{filter === 'pending' ? 'You’re all caught up.' : 'No submissions here yet.'}</strong><span>{filter === 'pending' ? 'New writer work will appear here for review.' : 'Writer submissions will appear here when they are sent.'}</span></div>}
+      {loading && !result && <div className="ga-empty">Loading submissions…</div>}
+      {error && !result && <div className="ga-empty">The submission queue could not be loaded.</div>}
+      <p className="admin-content-note"><GaIcon name="info" size={14} /> Writers need admin approval before they can submit. Every book, meme and quote needs its own review before publication.</p>
     </div>
   )
 }

@@ -280,7 +280,9 @@ export default function AdminUsersManager() {
   useEffect(() => { void loadMembers() }, [loadMembers])
 
   useEffect(() => {
-    const memberId = new URLSearchParams(window.location.search).get('memberId')
+    // A member link from history (?memberId=) or a search typed in the top bar (?q=).
+    const params = new URLSearchParams(window.location.search)
+    const memberId = params.get('memberId') ?? params.get('q')
     if (memberId) {
       setSearchDraft(memberId)
       setSearch(memberId)

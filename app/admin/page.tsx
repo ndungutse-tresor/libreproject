@@ -1,13 +1,11 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getPool } from '@/lib/db'
 import { getSessionUserId } from '@/lib/session'
+import { books as catalogue } from '../libra-data'
 import AdminAccessDenied from './AdminAccessDenied'
+import LibraOverview, { type OverviewData } from './glass/LibraOverview'
 
-type CountRow = { count: string }
-type RecentUser = { name: string; email: string; role: string; created_at: Date }
-type RecentOrder = { id: string; name: string; plan: string; amount: string; currency: string; status: string; created_at: Date }
-type AdminDashboardProfile = { role: string; perms: string[] }
+type AdminDashboardProfile = { name: string; role: string; perms: string[] }
 
 export default async function AdminDashboardPage() {
   let profile: AdminDashboardProfile | undefined
@@ -16,20 +14,14 @@ export default async function AdminDashboardPage() {
   try {
     if (userId) {
       const { rows } = await getPool().query<AdminDashboardProfile>(
-        'SELECT role, perms FROM profiles WHERE id = $1',
+        'SELECT name, role, perms FROM profiles WHERE id = $1',
         [userId]
       )
       profile = rows[0]
     }
   } catch (error) {
     console.error('Unable to verify admin dashboard access:', error)
-    return (
-      <section className="admin-error-panel">
-        <p className="admin-eyebrow">DASHBOARD UNAVAILABLE</p>
-        <h1>We couldn’t verify your workspace access.</h1>
-        <p>Check the database connection and try again.</p>
-      </section>
-    )
+    return <Unavailable title="We couldn’t verify your workspace access." />
   }
 
   if (profile?.role !== 'super') {
@@ -39,110 +31,100 @@ export default async function AdminDashboardPage() {
 
   try {
     const pool = getPool()
-    const [members, premium, plans, paidOrders, recentUsers, recentOrders, auditEvents] = await Promise.all([
-      pool.query<CountRow>('SELECT count(*)::text AS count FROM profiles'),
-      pool.query<CountRow>("SELECT count(*)::text AS count FROM profiles WHERE premium_until > now()"),
-      pool.query<CountRow>('SELECT count(*)::text AS count FROM plans WHERE enabled = true'),
-      pool.query<CountRow>("SELECT count(*)::text AS count FROM orders WHERE status = 'paid'"),
-      pool.query<RecentUser>(
-        'SELECT name, email, role, created_at FROM profiles ORDER BY created_at DESC LIMIT 6'
+    // Order amounts are stored in the buyer's currency; rate_to_usd is units per US dollar.
+    const [monthly, plans, stats, recentOrders, recentMembers, activity] = await Promise.all([
+      pool.query<{ month: string; usd: number; orders: number }>(
+        `SELECT to_char(date_trunc('month', orders.created_at), 'YYYY-MM') AS month,
+                coalesce(sum(orders.amount / NULLIF(currencies.rate_to_usd, 0)), 0)::float AS usd,
+                count(*)::int AS orders
+         FROM orders
+         JOIN currencies ON currencies.code = orders.currency
+         WHERE orders.status = 'paid' AND orders.created_at >= date_trunc('month', now()) - interval '11 months'
+         GROUP BY 1
+         ORDER BY 1`
       ),
-      pool.query<RecentOrder>(
-        `SELECT orders.id::text, profiles.name, plans.name AS plan, orders.amount::text, orders.currency,
-                orders.status, orders.created_at
+      pool.query<{ label: string; usd: number; orders: number }>(
+        `SELECT plans.name AS label,
+                coalesce(sum(orders.amount / NULLIF(currencies.rate_to_usd, 0)), 0)::float AS usd,
+                count(*)::int AS orders
+         FROM orders
+         JOIN plans ON plans.id = orders.plan_id
+         JOIN currencies ON currencies.code = orders.currency
+         WHERE orders.status = 'paid' AND orders.created_at >= now() - interval '12 months'
+         GROUP BY plans.name
+         ORDER BY usd DESC`
+      ),
+      pool.query(
+        `SELECT
+           (SELECT count(*) FROM profiles)::int AS members,
+           (SELECT count(*) FROM profiles WHERE created_at >= date_trunc('month', now()))::int AS members_this_month,
+           (SELECT count(*) FROM profiles WHERE created_at >= date_trunc('month', now()) - interval '1 month'
+                                            AND created_at < date_trunc('month', now()))::int AS members_last_month,
+           (SELECT count(*) FROM content_submissions WHERE status = 'pending')::int AS pending_submissions,
+           (SELECT count(*) FROM profiles WHERE account_type = 'writer' AND writer_status = 'pending')::int AS pending_writers,
+           (SELECT count(*) FROM profiles WHERE account_type = 'writer' AND writer_status = 'approved')::int AS writers,
+           (SELECT count(*) FROM profiles WHERE premium_until > now())::int AS premium,
+           (SELECT count(*) FROM orders WHERE status = 'paid')::int AS paid_total,
+           (SELECT count(*) FROM orders WHERE status = 'pending')::int AS pending_orders,
+           (SELECT count(*) FROM books WHERE is_published)::int AS db_books,
+           (SELECT count(*) FROM content_submissions WHERE status = 'approved')::int AS approved_work,
+           (SELECT count(*) FROM admin_audit_log WHERE created_at >= now() - interval '30 days')::int AS audit_30`
+      ),
+      pool.query(
+        `SELECT orders.id::text AS id, profiles.name, profiles.email, plans.name AS plan,
+                orders.amount::float AS amount, orders.currency, orders.status, orders.created_at
          FROM orders
          JOIN profiles ON profiles.id = orders.user_id
          JOIN plans ON plans.id = orders.plan_id
          ORDER BY orders.created_at DESC
-         LIMIT 5`
+         LIMIT 6`
       ),
-      pool.query<CountRow>('SELECT count(*)::text AS count FROM admin_audit_log')
+      pool.query(
+        `SELECT id::text AS id, name, email, role, account_type, writer_status, created_at
+         FROM profiles ORDER BY created_at DESC LIMIT 6`
+      ),
+      pool.query(
+        `SELECT id::text AS id, actor_name, summary, entity_type, created_at
+         FROM admin_audit_log ORDER BY created_at DESC LIMIT 6`
+      )
     ])
 
-    const stats = [
-      { label: 'Total members', value: members.rows[0].count, note: 'Registered Libra accounts', mark: '♙' },
-      { label: 'Premium members', value: premium.rows[0].count, note: 'Currently active access', mark: '✦' },
-      { label: 'Paid orders', value: paidOrders.rows[0].count, note: 'Completed purchases', mark: '↗' },
-      { label: 'Active plans', value: plans.rows[0].count, note: 'Available on pricing page', mark: '◇' },
-      { label: 'Admin history', value: auditEvents.rows[0].count, note: 'Recorded admin actions', mark: '◷' }
-    ]
-
-    return (
-      <div className="admin-dashboard">
-        <section className="admin-welcome">
-          <div>
-            <p className="admin-eyebrow">YOUR PLATFORM AT A GLANCE</p>
-            <h1>Good day. Here’s your overview.</h1>
-            <p>Keep an eye on your community and manage the Libra reading experience.</p>
-          </div>
-          <Link href="/admin/history" className="admin-primary-link">Review admin history <span aria-hidden="true">→</span></Link>
-        </section>
-
-        <section className="admin-stat-grid" aria-label="Platform metrics">
-          {stats.map((stat) => (
-            <article className="admin-stat-card" key={stat.label}>
-              <div className="admin-stat-heading"><span>{stat.label}</span><span className="admin-stat-mark" aria-hidden="true">{stat.mark}</span></div>
-              <strong>{stat.value}</strong>
-              <p>{stat.note}</p>
-            </article>
-          ))}
-        </section>
-
-        <div className="admin-dashboard-grid">
-          <section className="admin-panel">
-            <div className="admin-panel-heading">
-              <div><p className="admin-eyebrow">COMMUNITY</p><h2>Recently joined</h2></div>
-              <Link href="/admin/users">All members <span aria-hidden="true">→</span></Link>
-            </div>
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead><tr><th>Member</th><th>Account type</th><th>Joined</th></tr></thead>
-                <tbody>
-                  {recentUsers.rows.map((user) => (
-                    <tr key={user.email}>
-                      <td><strong>{user.name}</strong><span className="admin-table-sub">{user.email}</span></td>
-                      <td><span className={`admin-badge ${user.role === 'user' ? 'admin-badge-neutral' : 'admin-badge-green'}`}>{user.role === 'super' ? 'Super admin' : user.role === 'admin' ? 'Admin' : 'Member'}</span></td>
-                      <td>{new Date(user.created_at).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                  {recentUsers.rows.length === 0 && <tr><td colSpan={3} className="admin-empty-cell">New members will appear here.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="admin-panel">
-            <div className="admin-panel-heading">
-              <div><p className="admin-eyebrow">PLATFORM</p><h2>Recent orders</h2></div>
-              <Link href="/admin/orders">All orders <span aria-hidden="true">→</span></Link>
-            </div>
-            <div className="admin-order-list">
-              {recentOrders.rows.map((order) => (
-                <article className="admin-order-row" key={order.id}>
-                  <span className="admin-order-icon" aria-hidden="true">{order.status === 'paid' ? '✓' : '◷'}</span>
-                  <div className="admin-order-copy"><strong>{order.plan}</strong><span>{order.name} · {new Date(order.created_at).toLocaleDateString()}</span></div>
-                  <div className="admin-order-amount"><strong>{order.currency} {Number(order.amount).toFixed(2)}</strong><span className={`admin-badge ${order.status === 'paid' ? 'admin-badge-green' : 'admin-badge-neutral'}`}>{order.status}</span></div>
-                </article>
-              ))}
-              {recentOrders.rows.length === 0 && <p className="admin-empty-state">Completed and pending orders will appear here.</p>}
-            </div>
-          </section>
-        </div>
-
-        <section className="admin-shortcuts">
-          <div><span className="admin-shortcut-icon" aria-hidden="true">♙</span><div><strong>Manage your community</strong><p>Search members and update their reading access.</p></div><Link href="/admin/users" aria-label="Open user management">→</Link></div>
-          <div><span className="admin-shortcut-icon" aria-hidden="true">◇</span><div><strong>Configure the platform</strong><p>Review plans, payment methods, coupons, and currencies.</p></div><Link href="/admin/payments" aria-label="Open platform settings">→</Link></div>
-        </section>
-      </div>
-    )
+    const s = stats.rows[0]
+    const data: OverviewData = {
+      name: profile.name.trim().split(/\s+/)[0] || 'there',
+      monthly: monthly.rows,
+      plans: plans.rows,
+      stats: {
+        members: s.members,
+        membersThisMonth: s.members_this_month,
+        membersLastMonth: s.members_last_month,
+        pendingSubmissions: s.pending_submissions,
+        pendingWriters: s.pending_writers,
+        writers: s.writers,
+        premium: s.premium,
+        paidTotal: s.paid_total,
+        pendingOrders: s.pending_orders,
+        books: catalogue.length + s.db_books,
+        writerBooks: s.db_books,
+        approvedWork: s.approved_work,
+        audit30: s.audit_30
+      },
+      recentOrders: recentOrders.rows.map((row) => ({ ...row, created_at: new Date(row.created_at).toISOString() })),
+      recentMembers: recentMembers.rows.map((row) => ({ ...row, created_at: new Date(row.created_at).toISOString() })),
+      activity: activity.rows.map((row) => ({ ...row, created_at: new Date(row.created_at).toISOString() }))
+    }
+    return <LibraOverview data={data} />
   } catch (error) {
     console.error('Unable to load admin dashboard:', error)
-    return (
-      <section className="admin-error-panel">
-        <p className="admin-eyebrow">DASHBOARD UNAVAILABLE</p>
-        <h1>We couldn’t load your platform overview.</h1>
-        <p>Check the database connection and try again.</p>
-      </section>
-    )
+    return <Unavailable title="We couldn’t load your platform overview." />
   }
+}
+
+function Unavailable({ title }: { title: string }) {
+  return (
+    <div className="ga-empty" role="alert">
+      <strong>{title}</strong>
+      <span>Check the database connection and try again.</span>
+    </div>
+  )
 }

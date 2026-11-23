@@ -1,0 +1,456 @@
+/*
+ * Libra's existing admin screens (members, orders, publishing, settings, history)
+ * dressed in the glass admin look. Everything is scoped to .ga-shell so the old
+ * admin rules in globals.css never leak through.
+ */
+
+/* pages float in, block by block */
+.ga-shell .ga-page > [class^='admin-'] > :not([class*='ga-']) { animation: ga-rise-in 680ms var(--ga-ease) both; }
+.ga-shell .ga-page > [class^='admin-'] > :not([class*='ga-']):nth-child(2) { animation-delay: 150ms; }
+.ga-shell .ga-page > [class^='admin-'] > :not([class*='ga-']):nth-child(3) { animation-delay: 210ms; }
+.ga-shell .ga-page > [class^='admin-'] > :not([class*='ga-']):nth-child(4) { animation-delay: 270ms; }
+.ga-shell .ga-page > [class^='admin-'] > :not([class*='ga-']):nth-child(n + 5) { animation-delay: 330ms; }
+.ga-shell .ga-page > [class^='admin-'] > [class$='-stats'] > * { animation: ga-rise-in 680ms var(--ga-ease) both; }
+.ga-shell .ga-page > [class^='admin-'] > [class$='-stats'] > *:nth-child(2) { animation-delay: 220ms; }
+.ga-shell .ga-page > [class^='admin-'] > [class$='-stats'] > *:nth-child(3) { animation-delay: 280ms; }
+.ga-shell .ga-page > [class^='admin-'] > [class$='-stats'] > *:nth-child(4) { animation-delay: 340ms; }
+
+/* ---------- headings ---------- */
+.ga-shell .admin-page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.ga-shell .admin-page-heading h1 { margin: 2px 0 0; color: var(--ga-ink); font: 700 26px/1.15 var(--ga-sans); letter-spacing: -0.015em; }
+.ga-shell .admin-page-heading p { max-width: 640px; margin: 6px 0 0; color: var(--ga-muted); font-size: 12.5px; line-height: 1.5; }
+.ga-shell .admin-eyebrow { margin: 0; color: var(--ga-faint); font: 650 10px/1.2 var(--ga-sans); letter-spacing: 0.14em; text-transform: uppercase; }
+.ga-shell .admin-page-heading .admin-eyebrow { margin: 0; }
+
+/* ---------- buttons ---------- */
+.ga-shell :is(.admin-secondary-button, .admin-save-button, .admin-primary-link, .admin-settings-refresh, .admin-settings-toggle, .admin-settings-delete, .admin-history-restore, .admin-history-manage, .admin-clear-search, .admin-content-approve, .admin-content-reject, .admin-content-toggle) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+  color: #23384d;
+  font: 600 12px/1 var(--ga-sans);
+  letter-spacing: 0;
+  text-decoration: none;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 220ms var(--ga-ease), background-color 200ms ease, opacity 200ms ease;
+}
+.ga-shell :is(.admin-secondary-button, .admin-save-button, .admin-primary-link, .admin-settings-refresh, .admin-settings-toggle, .admin-settings-delete, .admin-history-restore, .admin-history-manage, .admin-clear-search, .admin-content-approve, .admin-content-reject, .admin-content-toggle):hover:not(:disabled) { transform: translateY(-1px); background: rgba(255, 255, 255, 0.88); }
+.ga-shell :is(.admin-save-button, .admin-primary-link, .admin-content-approve, .admin-history-restore) { border-color: #0d1724; background: #0d1724; color: #fff; }
+.ga-shell :is(.admin-save-button, .admin-primary-link, .admin-content-approve, .admin-history-restore):hover:not(:disabled) { background: #1a2738; }
+.ga-shell :is(.admin-settings-delete, .admin-content-reject) { color: var(--ga-red); }
+.ga-shell :is(button, a)[class^='admin-']:disabled { opacity: 0.5; cursor: not-allowed; }
+.ga-shell :is(button, a)[class^='admin-']:focus-visible { outline: 2px solid var(--ga-accent); outline-offset: 2px; }
+
+.ga-shell .admin-pagination button {
+  min-height: 30px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #23384d;
+  font: 600 11.5px/1 var(--ga-sans);
+  cursor: pointer;
+}
+.ga-shell .admin-pagination button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- summary tiles ---------- */
+.ga-shell :is(.admin-member-stats, .admin-order-stats, .admin-content-stats) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 14px;
+}
+.ga-shell :is(.admin-member-stat, .admin-order-stat, .admin-content-stats article) {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 112px;
+  text-align: left;
+  padding: 16px 18px;
+  border: 1px solid var(--ga-card-border);
+  border-radius: 18px;
+  background: var(--ga-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 30px -22px rgba(10, 40, 70, 0.45);
+  color: var(--ga-text);
+  transition: transform 320ms var(--ga-ease), box-shadow 320ms var(--ga-ease);
+}
+.ga-shell :is(.admin-member-stat, .admin-order-stat, .admin-content-stats article):hover { transform: translateY(-5px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 26px 40px -24px rgba(10, 40, 70, 0.55); }
+.ga-shell :is(.admin-member-stat-icon, .admin-order-stat-icon) {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 10px -6px rgba(10, 40, 70, 0.4);
+  color: #23384d;
+  font-size: 13px;
+}
+.ga-shell .admin-order-stat-icon.is-paid { color: var(--ga-green); }
+.ga-shell .admin-order-stat-icon.is-pending { color: var(--ga-amber); }
+.ga-shell .admin-order-stat-icon.is-failed { color: var(--ga-red); }
+.ga-shell :is(.admin-member-stat, .admin-order-stat) > div { display: flex; flex-direction: column-reverse; gap: 7px; }
+.ga-shell :is(.admin-member-stat, .admin-order-stat, .admin-content-stats article) span { color: var(--ga-text); font-size: 12px; font-weight: 600; }
+.ga-shell :is(.admin-member-stat, .admin-order-stat, .admin-content-stats article) strong { color: var(--ga-ink); font: 700 26px/1 var(--ga-sans); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.ga-shell .admin-content-stats article { justify-content: flex-end; flex-direction: column-reverse; }
+.ga-shell .admin-content-stats article.is-review strong { color: var(--ga-amber); }
+.ga-shell .admin-content-stats article.is-approved strong { color: var(--ga-green); }
+
+/* ---------- panels ---------- */
+.ga-shell .admin-panel {
+  margin: 0 0 14px;
+  padding: 18px;
+  border: 1px solid var(--ga-card-border);
+  border-radius: 18px;
+  background: var(--ga-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 30px -22px rgba(10, 40, 70, 0.45);
+  color: var(--ga-text);
+}
+.ga-shell :is(.admin-members-toolbar, .admin-orders-toolbar, .admin-content-toolbar, .admin-create-admin-heading, .admin-panel-heading) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+.ga-shell .admin-panel h2 { margin: 0; color: var(--ga-ink); font: 650 13.5px/1.3 var(--ga-sans); letter-spacing: 0; }
+.ga-shell .admin-panel h2 + p, .ga-shell .admin-panel :is(.admin-members-toolbar, .admin-orders-toolbar, .admin-content-toolbar, .admin-create-admin-heading) p { margin: 4px 0 0; color: var(--ga-muted); font-size: 11.5px; line-height: 1.5; }
+
+/* search */
+.ga-shell .admin-search-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ga-shell .admin-search-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 240px;
+  height: 34px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+}
+.ga-shell .admin-search-input > span { margin-right: 6px; color: var(--ga-faint); font-size: 14px; }
+.ga-shell .admin-search-input input { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: 0 !important; outline: 0; background: transparent !important; box-shadow: none !important; color: var(--ga-ink); font: 500 12.5px var(--ga-sans); }
+
+/* inputs */
+.ga-shell :is(.admin-panel, .admin-settings-card, .admin-history-toolbar) :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: none;
+  color: var(--ga-ink);
+  font: 500 12.5px/1.3 var(--ga-sans);
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+.ga-shell :is(.admin-panel, .admin-settings-card, .admin-history-toolbar) :is(input:not([type='checkbox']):not([type='radio']), select, textarea):focus {
+  border-color: rgba(31, 163, 224, 0.6);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 0 0 3px rgba(31, 163, 224, 0.15);
+}
+.ga-shell :is(.admin-panel, .admin-settings-card) :is(input, select, textarea):disabled { opacity: 0.55; }
+.ga-shell input[type='checkbox'] { accent-color: #1d90d4; }
+.ga-shell .admin-input-label, .ga-shell .admin-settings-field > span {
+  display: grid;
+  gap: 5px;
+  color: var(--ga-text);
+  font: 600 11px/1.3 var(--ga-sans);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ga-shell .admin-input-label small { color: var(--ga-muted); font-weight: 500; }
+.ga-shell .admin-input-suffix { display: flex; align-items: center; gap: 6px; }
+.ga-shell .admin-input-suffix > span { color: var(--ga-muted); font-size: 11px; }
+.ga-shell .admin-required { color: var(--ga-red); }
+
+/* ---------- tables ---------- */
+.ga-shell :is(.admin-table-wrap, .admin-settings-table-wrap) { overflow-x: auto; margin: 0 -4px; border: 0; background: none; }
+.ga-shell :is(.admin-table, .admin-settings-table) { width: 100%; border-collapse: collapse; background: none; font: 400 12px/1.45 var(--ga-sans); }
+.ga-shell :is(.admin-table, .admin-settings-table) th {
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--ga-line-strong);
+  background: none;
+  color: var(--ga-faint);
+  font: 650 10px/1.3 var(--ga-sans);
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ga-shell :is(.admin-table, .admin-settings-table) td { padding: 11px 10px; border: 0; border-bottom: 1px solid var(--ga-line); background: none; color: var(--ga-text); vertical-align: middle; }
+.ga-shell .admin-members-table td, .ga-shell .admin-history-table td { vertical-align: top; }
+.ga-shell :is(.admin-table, .admin-settings-table) tbody tr { transition: background-color 160ms ease; }
+.ga-shell :is(.admin-table, .admin-settings-table) tbody tr:hover { background: rgba(255, 255, 255, 0.4); }
+.ga-shell :is(.admin-table, .admin-settings-table) tr:last-child td { border-bottom: 0; }
+.ga-shell :is(.admin-table, .admin-settings-table) strong { color: var(--ga-ink); font-weight: 600; }
+.ga-shell .admin-table-sub { display: block; margin-top: 2px; color: var(--ga-muted); font-size: 11px; }
+.ga-shell :is(.admin-empty-cell, .admin-settings-empty) { padding: 34px 10px !important; color: var(--ga-muted) !important; text-align: center; }
+
+.ga-shell .admin-member-cell { display: flex; align-items: center; gap: 10px; min-width: 200px; }
+.ga-shell .admin-member-cell > span:last-child { display: grid; min-width: 0; }
+.ga-shell .admin-member-cell small { color: var(--ga-muted); font-size: 11px; overflow-wrap: anywhere; }
+.ga-shell .admin-member-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #3cc6ea, #1d7fd0);
+  color: #fff;
+  font: 700 11.5px var(--ga-sans);
+}
+.ga-shell :is(.admin-member-form, .admin-role-editor, .admin-member-credentials, .admin-writer-editor) { display: grid; gap: 8px; min-width: 180px; }
+.ga-shell :is(.admin-member-credentials, .admin-writer-editor) { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--ga-line-strong); }
+.ga-shell .admin-permission-list { display: grid; gap: 5px; margin-top: 4px; }
+.ga-shell .admin-permission-list label { display: flex; align-items: center; gap: 7px; color: var(--ga-text); font-size: 12px; }
+.ga-shell .admin-role-readonly { display: grid; gap: 4px; justify-items: start; }
+.ga-shell .admin-role-readonly small { color: var(--ga-muted); font-size: 11px; }
+.ga-shell .admin-save-cell { white-space: nowrap; }
+.ga-shell :is(.admin-row-saved, .admin-row-error) { display: block; margin-top: 6px; font-size: 11px; font-weight: 600; }
+.ga-shell .admin-row-saved { color: var(--ga-green); }
+.ga-shell .admin-row-error { color: var(--ga-red); }
+
+/* chips */
+.ga-shell :is(.admin-badge, .admin-order-status, .admin-status-pill, .admin-submission-status) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(16, 40, 64, 0.07);
+  color: var(--ga-text);
+  font: 650 10.5px/1 var(--ga-sans);
+  letter-spacing: 0;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.ga-shell :is(.admin-order-status, .admin-status-pill) > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ga-shell :is(.admin-badge-green, .admin-order-status.is-paid, .admin-status-pill.is-enabled, .admin-submission-status.is-approved) { background: var(--ga-green-bg); color: var(--ga-green); }
+.ga-shell :is(.admin-order-status.is-pending, .admin-submission-status.is-pending) { background: var(--ga-amber-bg); color: var(--ga-amber); }
+.ga-shell :is(.admin-order-status.is-failed, .admin-submission-status.is-rejected) { background: var(--ga-red-bg); color: var(--ga-red); }
+.ga-shell .admin-status-pill.is-disabled { color: var(--ga-muted); }
+
+/* filters as a segmented pill */
+.ga-shell :is(.admin-order-filters, .admin-content-filters) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0 0 14px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.ga-shell :is(.admin-order-filters, .admin-content-filters) button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ga-muted);
+  font: 600 11px/1 var(--ga-sans);
+  cursor: pointer;
+  transition: background-color 220ms var(--ga-ease), color 200ms ease;
+}
+.ga-shell :is(.admin-order-filters, .admin-content-filters) button.is-selected { background: #0d1724; color: #fff; }
+.ga-shell :is(.admin-order-filters, .admin-content-filters) button span { display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: rgba(16, 40, 64, 0.1); font-size: 9.5px; }
+.ga-shell :is(.admin-order-filters, .admin-content-filters) button.is-selected span { background: rgba(255, 255, 255, 0.2); }
+
+/* messages */
+.ga-shell :is(.admin-inline-error, .admin-inline-success) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 9px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.66);
+  font-size: 12.5px;
+  animation: ga-pop 260ms var(--ga-ease) both;
+}
+.ga-shell .admin-inline-error { color: var(--ga-red); }
+.ga-shell .admin-inline-success { color: var(--ga-green); }
+.ga-shell :is(.admin-orders-note, .admin-content-note, .admin-permission-note, .admin-history-note) {
+  display: flex;
+  gap: 8px;
+  margin: 10px 2px 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ga-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* pagination */
+.ga-shell .admin-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ga-line);
+  background: none;
+  color: var(--ga-muted);
+  font-size: 11.5px;
+}
+.ga-shell .admin-pagination > div { display: flex; align-items: center; gap: 8px; }
+
+/* add an administrator */
+.ga-shell .admin-create-admin-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.ga-shell .admin-create-admin-form > :is(.admin-inline-error, .admin-inline-success, button) { grid-column: 1 / -1; justify-self: start; }
+.ga-shell .admin-create-admin-permissions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; border: 0; }
+.ga-shell .admin-create-admin-permissions legend { margin-bottom: 8px; padding: 0; color: var(--ga-text); font: 600 11px var(--ga-sans); }
+.ga-shell .admin-create-admin-permissions label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+}
+.ga-shell .admin-create-admin-permissions strong { display: block; color: var(--ga-ink); font-size: 12px; }
+.ga-shell .admin-create-admin-permissions small { display: block; color: var(--ga-muted); font-size: 11px; }
+
+/* ---------- history ---------- */
+.ga-shell .admin-history-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; }
+.ga-shell .admin-history-toolbar .admin-search-input { flex: 1 1 260px; }
+.ga-shell .admin-history-filter-label { color: var(--ga-muted); font-size: 11px; font-weight: 600; }
+.ga-shell .admin-history-count { margin-left: auto; color: var(--ga-muted); font-size: 11.5px; }
+.ga-shell .admin-history-details summary { margin-top: 6px; color: var(--ga-blue); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.ga-shell .admin-history-snapshots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.ga-shell .admin-history-snapshots pre {
+  max-height: 220px;
+  margin: 4px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 11px;
+  background: rgba(13, 23, 36, 0.86);
+  color: #d8ecff;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ga-shell .admin-history-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---------- platform settings ---------- */
+.ga-shell .admin-settings-secure { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border-radius: 999px; background: var(--ga-green-bg); color: var(--ga-green); font: 650 11.5px var(--ga-sans); }
+.ga-shell :is(.admin-settings-intro, .admin-access-card) {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--ga-card-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.42);
+  color: var(--ga-text);
+}
+.ga-shell :is(.admin-settings-intro, .admin-access-card) p { margin: 3px 0 0; color: var(--ga-muted); font-size: 12px; }
+.ga-shell :is(.admin-settings-intro-icon, .admin-settings-icon) {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 10px -6px rgba(10, 40, 70, 0.4);
+  color: #23384d;
+}
+.ga-shell .admin-settings-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.ga-shell .admin-settings-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--ga-card-border);
+  border-radius: 18px;
+  background: var(--ga-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 30px -22px rgba(10, 40, 70, 0.45);
+  transition: transform 320ms var(--ga-ease), box-shadow 320ms var(--ga-ease);
+}
+.ga-shell .admin-settings-card:hover { transform: translateY(-3px); }
+.ga-shell .admin-settings-card-header { display: flex; align-items: flex-start; gap: 12px; margin: 0 0 12px; padding: 0; border: 0; }
+.ga-shell .admin-settings-card-header > div { flex: 1 1 auto; min-width: 0; }
+.ga-shell .admin-settings-card-title { display: flex; align-items: center; gap: 8px; }
+.ga-shell .admin-settings-card-title h2 { margin: 0; color: var(--ga-ink); font: 650 13.5px var(--ga-sans); }
+.ga-shell .admin-settings-card-header p { margin: 3px 0 0; color: var(--ga-muted); font-size: 11.5px; }
+.ga-shell .admin-settings-count { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: rgba(16, 40, 64, 0.08); color: var(--ga-text); font-size: 10.5px; font-weight: 650; }
+.ga-shell .admin-settings-refresh { min-height: 30px; width: 30px; padding: 0; }
+.ga-shell .admin-settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.ga-shell .admin-settings-actions button { min-height: 28px; padding: 0 10px; font-size: 11px; }
+.ga-shell .admin-settings-edit-row td { background: rgba(255, 255, 255, 0.35); }
+.ga-shell :is(.admin-settings-edit-form, .admin-settings-form) { display: grid; gap: 12px; }
+.ga-shell .admin-settings-form { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--ga-line-strong); }
+.ga-shell .admin-settings-form-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ga-shell .admin-settings-form-heading h3 { margin: 0; color: var(--ga-ink); font: 650 12.5px var(--ga-sans); }
+.ga-shell .admin-settings-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ga-shell .admin-settings-field { display: grid; gap: 5px; }
+.ga-shell .admin-settings-edit-actions { display: flex; gap: 8px; }
+
+.ga-shell .admin-error-panel { display: grid; gap: 6px; padding: 40px 10px; text-align: center; }
+.ga-shell .admin-error-panel h1 { margin: 0; color: var(--ga-ink); font: 700 20px var(--ga-sans); }
+.ga-shell .admin-error-panel p { margin: 0; color: var(--ga-muted); }
+
+@media (max-width: 1180px) {
+  .ga-shell .admin-settings-sections { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .ga-shell .admin-page-heading { flex-direction: column; }
+  .ga-shell :is(.admin-member-stats, .admin-order-stats, .admin-content-stats) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ga-shell .admin-create-admin-form, .ga-shell .admin-create-admin-permissions { grid-template-columns: minmax(0, 1fr); }
+  .ga-shell .admin-search-input { min-width: 0; flex: 1 1 200px; }
+  .ga-shell .admin-history-snapshots { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* details the old admin styles set differently */
+.ga-shell .admin-settings-form { padding: 14px 0 0; border: 0; border-top: 1px dashed var(--ga-line-strong); border-radius: 0; background: none; box-shadow: none; }
+.ga-shell :is(.admin-table-sub, .admin-badge, .admin-history-admin) { text-transform: none; }
+.ga-shell .admin-settings-form-heading p { margin: 3px 0 0; color: var(--ga-muted); font-size: 11px; }
+
+/* page columns: never wider than the glass sheet, spaced like the rest of the workspace */
+.ga-shell :is(.admin-content-page, .admin-orders-page, .admin-users-page, .admin-settings-page, .admin-history-page) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+.ga-shell :is(.admin-content-page, .admin-orders-page, .admin-users-page, .admin-settings-page, .admin-history-page) > * { margin-top: 0 !important; margin-bottom: 0 !important; }
+.ga-shell :is(.admin-content-page, .admin-orders-page, .admin-users-page, .admin-settings-page, .admin-history-page) > .ga-head { margin-bottom: 6px !important; }

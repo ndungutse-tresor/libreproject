@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     const offset = (page - 1) * pageSize
     const pool = getPool()
 
-    const [orders, count, summary] = await Promise.all([
+    const [orders, count, summary, monthly, plans] = await Promise.all([
       pool.query(
         `SELECT orders.id::text AS id, profiles.name, profiles.email, plans.name AS plan,
                 payment_methods.label AS method, orders.amount::text AS amount, orders.currency,
@@ -61,6 +61,27 @@ export async function GET(request: Request) {
                 count(*) FILTER (WHERE status = 'pending')::text AS pending,
                 count(*) FILTER (WHERE status = 'failed')::text AS failed
          FROM orders`
+      ),
+      // Paid revenue per month in US dollars (amounts are stored in the buyer's currency).
+      pool.query(
+        `SELECT to_char(date_trunc('month', orders.created_at), 'YYYY-MM') AS month,
+                coalesce(sum(orders.amount / NULLIF(currencies.rate_to_usd, 0)), 0)::float AS usd,
+                count(*)::int AS orders
+         FROM orders
+         JOIN currencies ON currencies.code = orders.currency
+         WHERE orders.status = 'paid' AND orders.created_at >= date_trunc('month', now()) - interval '11 months'
+         GROUP BY 1
+         ORDER BY 1`
+      ),
+      pool.query(
+        `SELECT plans.name AS label, count(*)::int AS orders,
+                coalesce(sum(orders.amount / NULLIF(currencies.rate_to_usd, 0)), 0)::float AS usd
+         FROM orders
+         JOIN plans ON plans.id = orders.plan_id
+         JOIN currencies ON currencies.code = orders.currency
+         WHERE orders.status = 'paid'
+         GROUP BY plans.name
+         ORDER BY usd DESC`
       )
     ])
 
@@ -73,6 +94,8 @@ export async function GET(request: Request) {
         pending: Number(summary.rows[0].pending),
         failed: Number(summary.rows[0].failed)
       },
+      monthly: monthly.rows,
+      plans: plans.rows,
       page,
       pageSize
     })
