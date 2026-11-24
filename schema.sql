@@ -46,6 +46,30 @@ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_email_lower_unique ON profiles (lower(email));
 
+-- Email checks: new accounts sign up with Gmail and confirm it from an emailed link.
+-- Any other address can only sign in once an administrator approves it or creates the account.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'profiles' AND column_name = 'email_verified_at'
+  ) THEN
+    ALTER TABLE profiles ADD COLUMN email_verified_at timestamptz;
+    -- Accounts made before email confirmation existed count as confirmed (once, when the column is added).
+    -- Addresses that are not Gmail still need an administrator's approval.
+    UPDATE profiles SET email_verified_at = created_at;
+  END IF;
+END $$;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email_approved_at timestamptz;
+
+CREATE TABLE IF NOT EXISTS email_verifications (
+  token_hash text PRIMARY KEY,
+  profile_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS email_verifications_profile_idx ON email_verifications (profile_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS admin_audit_log (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   actor_id uuid REFERENCES profiles(id) ON DELETE SET NULL,

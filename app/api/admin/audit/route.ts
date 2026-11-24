@@ -82,7 +82,8 @@ async function restoreProfile(client: PoolClient, event: JsonRecord): Promise<Re
 
   const { rows } = await client.query(
     `SELECT id::text, name, email, role, perms, account_type, writer_status,
-            reading_seconds, premium_until, gender, age, bio, favorite_genres
+            reading_seconds, premium_until, gender, age, bio, favorite_genres,
+            email_verified_at, email_approved_at
      FROM profiles WHERE id = $1 FOR UPDATE`,
     [event.entity_id]
   )
@@ -95,7 +96,8 @@ async function restoreProfile(client: PoolClient, event: JsonRecord): Promise<Re
 
   const allowedFields = new Set([
     'name', 'email', 'role', 'perms', 'account_type', 'writer_status',
-    'reading_seconds', 'premium_until', 'gender', 'age', 'bio', 'favorite_genres'
+    'reading_seconds', 'premium_until', 'gender', 'age', 'bio', 'favorite_genres',
+    'email_verified_at', 'email_approved_at'
   ])
   const fields = Object.keys(before).filter((field) => field !== 'id' && allowedFields.has(field))
   const assignments = fields.map((field, index) => `${field} = $${index + 2}${field === 'perms' || field === 'favorite_genres' ? '::text[]' : ''}`)

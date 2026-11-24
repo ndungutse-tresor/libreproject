@@ -17,8 +17,23 @@ const defaultBookCovers: AuthBookCover[] = [
   { eyebrow: 'LIBRA COLLECTION', title: 'Notes from home', footer: 'KEEP WHAT MOVES YOU' }
 ]
 
+const isGmail = (email: string) => /^[^\s@]+@(gmail|googlemail)\.com$/i.test(email.trim())
+
+const VERIFIED_NOTICES: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
+  '1': { tone: 'ok', text: 'Your email is confirmed. Log in to start reading.' },
+  expired: { tone: 'warn', text: 'That link has expired or was already used. Log in and we can send you a new one.' },
+  error: { tone: 'warn', text: 'We couldn’t confirm your email just now. Open the link again in a minute.' }
+}
+
 export default function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [error, setError] = useState('')
+  const [errorCode, setErrorCode] = useState('')
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null)
+  // After signing up (or when a login needs confirming first): the address the link went to.
+  const [pendingEmail, setPendingEmail] = useState('')
+  const [sentNow, setSentNow] = useState(true)
+  const [resendWait, setResendWait] = useState(0)
+  const [resendMessage, setResendMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [accountType, setAccountType] = useState<AccountType | null>(mode === 'register' ? 'reader' : null)
   const [showPassword, setShowPassword] = useState(false)
@@ -52,12 +67,51 @@ export default function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     return () => { active = false }
   }, [])
 
+  // Coming back from the confirmation link.
+  useEffect(() => {
+    const verified = new URLSearchParams(window.location.search).get('verified')
+    if (verified && VERIFIED_NOTICES[verified]) setNotice(VERIFIED_NOTICES[verified])
+  }, [])
+
+  useEffect(() => {
+    if (resendWait <= 0) return
+    const timer = window.setTimeout(() => setResendWait((seconds) => seconds - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [resendWait])
+
+  async function resend(email: string) {
+    setResendMessage('')
+    try {
+      const response = await fetch('/api/auth/verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        if (typeof result.wait === 'number') setResendWait(result.wait)
+        setResendMessage(result.error ?? 'Unable to send a new link.')
+        return
+      }
+      setResendWait(60)
+      setResendMessage(result.message ?? 'A new link is on its way.')
+    } catch {
+      setResendMessage('Unable to reach the server. Try again.')
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
+    setErrorCode('')
+    setResendMessage('')
     const form = new FormData(event.currentTarget)
     if (mode === 'register' && form.get('password') !== form.get('confirmPassword')) {
       setError('Passwords do not match.')
+      return
+    }
+    if (mode === 'register' && !isGmail(String(form.get('email') ?? ''))) {
+      setError('Libra accounts use Gmail. Enter an address that ends in @gmail.com.')
       return
     }
 
@@ -74,6 +128,15 @@ export default function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       const result = await response.json()
       if (!response.ok) {
         setError(result.error ?? 'Unable to authenticate.')
+        setErrorCode(result.code ?? '')
+        if (result.code === 'unverified') setPendingEmail(String(payload.email ?? ''))
+        return
+      }
+      if (mode === 'register' && result.verify) {
+        // The account opens from the link in the email, not straight away.
+        setPendingEmail(result.email)
+        setSentNow(result.sent !== false)
+        setResendWait(result.sent === false ? 0 : 60)
         return
       }
       let destination = accountType === 'writer' ? '/writer' : '/library'
@@ -133,6 +196,20 @@ export default function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         <p className="auth-description">
           {mode === 'login' ? 'Pick up where you left off and get back to a good book.' : 'Join Libra and make a little more room for reading.'}
         </p>
+        {mode === 'register' && pendingEmail ? (
+          <div className="auth-check-email" role="status">
+            <span className="auth-check-email-icon" aria-hidden="true">✉</span>
+            <h2>Check your Gmail</h2>
+            <p>{sentNow ? <>We sent a confirmation link to <strong>{pendingEmail}</strong>. Open it to finish creating your account.</> : <>Your account is ready, but the confirmation email didn’t go out. Send it again below.</>}</p>
+            <p className="auth-check-email-note">It can take a minute. Look in Spam or Promotions if you don’t see it.</p>
+            <button type="button" className="auth-submit auth-submit-light" disabled={resendWait > 0} onClick={() => void resend(pendingEmail)}>
+              {resendWait > 0 ? `Send a new link in ${resendWait}s` : 'Send a new link'}
+            </button>
+            {resendMessage && <p className="auth-check-email-note" role="status">{resendMessage}</p>}
+            <Link href="/login" className="auth-submit">I’ve confirmed it, log in</Link>
+          </div>
+        ) : <>
+        {notice && <p className={`auth-notice is-${notice.tone}`} role="status">{notice.text}</p>}
         <form onSubmit={submit} className="auth-form">
         {mode === 'register' && (
           <label className="auth-field">Name
@@ -155,8 +232,9 @@ export default function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           </div>
           {mode === 'register' && accountType === 'writer' && <p className="auth-account-note">Writer accounts and every submission need admin approval before publishing.</p>}
         </fieldset>
-        <label className="auth-field">Email
-          <input name="email" type="email" placeholder="you@example.com" autoComplete="email" required />
+        <label className="auth-field">{mode === 'register' ? 'Gmail address' : 'Email'}
+          <input name="email" type="email" placeholder="you@gmail.com" autoComplete="email" required maxLength={254} />
+          {mode === 'register' && <small className="auth-field-hint">Libra accounts use Gmail. We’ll email you a link to confirm it.</small>}
         </label>
         <label className="auth-field">Password
           <span className="auth-password-control">
@@ -185,10 +263,17 @@ export default function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           </label>
         )}
         {error && <p role="alert" style={{ color: '#b91c1c', margin: 0 }}>{error}</p>}
+        {errorCode === 'unverified' && pendingEmail && <div className="auth-resend">
+          <button type="button" className="auth-link-button" disabled={resendWait > 0} onClick={() => void resend(pendingEmail)}>
+            {resendWait > 0 ? `Send a new confirmation link in ${resendWait}s` : 'Send a new confirmation link'}
+          </button>
+          {resendMessage && <p role="status">{resendMessage}</p>}
+        </div>}
         <button disabled={busy} type="submit" className="auth-submit">
           {busy ? 'Please wait…' : mode === 'login' ? 'Continue' : 'Create account'}
         </button>
         </form>
+        </>}
         <p className="auth-switch">
         {mode === 'login' ? <>New to Libra? <Link href="/signup">Create an account</Link></> : <>Already registered? <Link href="/login">Log in</Link></>}
         </p>

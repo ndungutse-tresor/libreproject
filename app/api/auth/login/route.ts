@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs'
 import { NextResponse } from 'next/server'
 import { getPool } from '@/lib/db'
 import { createSession } from '@/lib/session'
+import { signInBlock } from '@/lib/email-access'
 
 export const runtime = 'nodejs'
 
@@ -23,10 +24,11 @@ export async function POST(request: Request) {
       }
       const passwordHash = await bcrypt.hash(adminPassword, 12)
       const { rows } = await pool.query(
-        `INSERT INTO profiles (name, email, password_hash, role)
-         VALUES ('Administrator', $1, $2, 'super')
+        `INSERT INTO profiles (name, email, password_hash, role, email_verified_at)
+         VALUES ('Administrator', $1, $2, 'super', now())
          ON CONFLICT (lower(email)) DO UPDATE
-         SET role = 'super', password_hash = EXCLUDED.password_hash, account_type = 'reader', writer_status = 'disabled'
+         SET role = 'super', password_hash = EXCLUDED.password_hash, account_type = 'reader', writer_status = 'disabled',
+             email_verified_at = coalesce(profiles.email_verified_at, now())
          RETURNING id, name, email, role, perms, account_type, writer_status`,
         [adminEmail, passwordHash]
       )
@@ -39,12 +41,16 @@ export async function POST(request: Request) {
     }
 
     const { rows } = await pool.query(
-      'SELECT id, name, email, role, perms, password_hash, account_type, writer_status FROM profiles WHERE lower(email) = $1',
+      `SELECT id, name, email, role, perms, password_hash, account_type, writer_status, email_verified_at, email_approved_at
+       FROM profiles WHERE lower(email) = $1`,
       [email]
     )
     if (!rows[0] || !(await bcrypt.compare(password, rows[0].password_hash))) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
     }
+    // Only checked after the password, so nobody can probe which addresses have accounts.
+    const blocked = signInBlock(rows[0])
+    if (blocked) return NextResponse.json({ error: blocked.message, code: blocked.code }, { status: 403 })
     if (rows[0].role === 'user' && rows[0].account_type !== accountType) {
       return NextResponse.json({
         error: `This account is set up as a ${rows[0].account_type}. Choose ${rows[0].account_type} to continue.`
@@ -52,7 +58,7 @@ export async function POST(request: Request) {
     }
 
     await createSession(rows[0].id)
-    const { password_hash: _passwordHash, ...user } = rows[0]
+    const { password_hash: _passwordHash, email_verified_at: _verified, email_approved_at: _approved, ...user } = rows[0]
     return NextResponse.json({ user })
   } catch (error) {
     console.error('Login failed:', error)

@@ -454,3 +454,12 @@
 }
 .ga-shell :is(.admin-content-page, .admin-orders-page, .admin-users-page, .admin-settings-page, .admin-history-page) > * { margin-top: 0 !important; margin-bottom: 0 !important; }
 .ga-shell :is(.admin-content-page, .admin-orders-page, .admin-users-page, .admin-settings-page, .admin-history-page) > .ga-head { margin-bottom: 6px !important; }
+
+/* whether a member's address lets them sign in */
+.ga-shell .admin-email-standing { display: inline-flex; align-items: center; width: fit-content; min-height: 19px; margin-top: 5px; padding: 0 8px; border-radius: 999px; font: 650 10px/1 var(--ga-sans); }
+.ga-shell .admin-email-standing.is-green { background: var(--ga-green-bg); color: var(--ga-green); }
+.ga-shell .admin-email-standing.is-amber { background: var(--ga-amber-bg); color: var(--ga-amber); }
+.ga-shell .admin-email-standing.is-red { background: var(--ga-red-bg); color: var(--ga-red); }
+.ga-shell .admin-email-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.ga-shell .admin-email-actions button { min-height: 26px; padding: 0 11px; font-size: 11px; }
+.ga-shell .admin-create-admin-permissions input[type='radio'] { accent-color: #1d90d4; }

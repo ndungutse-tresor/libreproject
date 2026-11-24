@@ -13,6 +13,19 @@ type Member = {
   reading_seconds: number
   premium_until: string | null
   created_at: string
+  email_verified_at: string | null
+  email_approved_at: string | null
+}
+
+const isGmail = (email: string) => /^[^\s@]+@(gmail|googlemail)\.com$/i.test(email.trim())
+
+/** Whether this account can sign in with its address, and why not. */
+function emailStanding(member: Member): { label: string; tone: 'green' | 'amber' | 'red'; canSignIn: boolean } {
+  if (member.role !== 'user') return { label: isGmail(member.email) ? 'Gmail' : 'Admin address', tone: 'green', canSignIn: true }
+  if (member.email_approved_at) return { label: isGmail(member.email) ? 'Gmail · approved' : 'Approved by an admin', tone: 'green', canSignIn: true }
+  if (!isGmail(member.email)) return { label: 'Not Gmail · needs approval', tone: 'red', canSignIn: false }
+  if (!member.email_verified_at) return { label: 'Gmail · not confirmed yet', tone: 'amber', canSignIn: false }
+  return { label: 'Gmail · confirmed', tone: 'green', canSignIn: true }
 }
 
 type MembersResult = {
@@ -24,6 +37,7 @@ type MembersResult = {
     administrators: number
     writers: number
     pendingWriters: number
+    needsApproval: number
   }
   page: number
   pageSize: number
@@ -54,6 +68,32 @@ function MemberRow({ member, canManageRoles, onSaved }: { member: Member; canMan
   const [credentialsError, setCredentialsError] = useState('')
   const [credentialsSaved, setCredentialsSaved] = useState(false)
   const isProtected = member.role === 'super'
+  const [accessBusy, setAccessBusy] = useState(false)
+  const [accessError, setAccessError] = useState('')
+  const standing = emailStanding(member)
+
+  /** Approve or withdraw an address that is not Gmail, or vouch for an unconfirmed Gmail address. */
+  async function changeEmailAccess(change: { emailAccess: 'approve' | 'withdraw' } | { emailVerified: true }) {
+    setAccessBusy(true)
+    setAccessError('')
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: member.id, ...change })
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setAccessError(result.error ?? 'Unable to change sign-in access.')
+        return
+      }
+      onSaved(result.user)
+    } catch {
+      setAccessError('Unable to reach the server. Try again.')
+    } finally {
+      setAccessBusy(false)
+    }
+  }
 
   function togglePermission(permission: string) {
     setPerms((current) => current.includes(permission)
@@ -160,7 +200,16 @@ function MemberRow({ member, canManageRoles, onSaved }: { member: Member; canMan
     <tr>
       <td className="admin-member-cell">
         <span className="admin-member-avatar" aria-hidden="true">{member.name.trim().slice(0, 1).toUpperCase()}</span>
-        <span><strong>{member.name}</strong><small>{member.email}</small></span>
+        <span>
+          <strong>{member.name}</strong><small>{member.email}</small>
+          <span className={`admin-email-standing is-${standing.tone}`}>{standing.label}</span>
+          {member.role === 'user' && <span className="admin-email-actions">
+            {!isGmail(member.email) && !member.email_approved_at && <button type="button" className="admin-content-approve" disabled={accessBusy} onClick={() => void changeEmailAccess({ emailAccess: 'approve' })}>{accessBusy ? 'Saving…' : 'Approve address'}</button>}
+            {isGmail(member.email) && !member.email_verified_at && !member.email_approved_at && <button type="button" className="admin-secondary-button" disabled={accessBusy} onClick={() => void changeEmailAccess({ emailVerified: true })}>{accessBusy ? 'Saving…' : 'Mark as confirmed'}</button>}
+            {!isGmail(member.email) && member.email_approved_at && <button type="button" className="admin-secondary-button" disabled={accessBusy} onClick={() => void changeEmailAccess({ emailAccess: 'withdraw' })}>{accessBusy ? 'Saving…' : 'Withdraw approval'}</button>}
+          </span>}
+          {accessError && <span className="admin-row-error" role="alert">{accessError}</span>}
+        </span>
       </td>
       <td>
         <form id={`member-${member.id}`} className="admin-member-form" onSubmit={(event) => void save(event)}>
@@ -251,6 +300,8 @@ export default function AdminUsersManager() {
   const [newAdminEmail, setNewAdminEmail] = useState('')
   const [newAdminPassword, setNewAdminPassword] = useState('')
   const [newAdminPermissions, setNewAdminPermissions] = useState<string[]>([])
+  const [newPersonRole, setNewPersonRole] = useState<'user' | 'admin'>('user')
+  const [newMemberType, setNewMemberType] = useState<'reader' | 'writer'>('reader')
   const [creatingAdmin, setCreatingAdmin] = useState(false)
   const [createAdminError, setCreateAdminError] = useState('')
   const [createAdminNotice, setCreateAdminNotice] = useState('')
@@ -315,25 +366,24 @@ export default function AdminUsersManager() {
       const response = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newAdminName,
-          email: newAdminEmail,
-          password: newAdminPassword,
-          perms: newAdminPermissions
-        })
+        body: JSON.stringify(newPersonRole === 'user'
+          ? { role: 'user', accountType: newMemberType, name: newAdminName, email: newAdminEmail, password: newAdminPassword }
+          : { role: 'admin', name: newAdminName, email: newAdminEmail, password: newAdminPassword, perms: newAdminPermissions })
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error ?? 'Unable to create administrator account.')
+      if (!response.ok) throw new Error(data.error ?? 'Unable to create the account.')
       setNewAdminName('')
       setNewAdminEmail('')
       setNewAdminPassword('')
       setNewAdminPermissions([])
-      setCreateAdminNotice(`Administrator access created for ${data.user.email}.`)
+      setCreateAdminNotice(newPersonRole === 'user'
+        ? `${data.user.name} can now sign in with ${data.user.email}.`
+        : `Administrator access created for ${data.user.email}.`)
       setSearchDraft(data.user.email)
       setSearch(data.user.email)
       setPage(1)
     } catch (reason) {
-      setCreateAdminError(reason instanceof Error ? reason.message : 'Unable to create administrator account.')
+      setCreateAdminError(reason instanceof Error ? reason.message : 'Unable to create the account.')
     } finally {
       setCreatingAdmin(false)
     }
@@ -373,9 +423,17 @@ export default function AdminUsersManager() {
         </article>
       </section>}
 
-      {result?.canManageRoles && <section className="admin-panel admin-create-admin">
+      {result && result.summary.needsApproval > 0 && <p className="ga-notice" role="status">
+        {result.summary.needsApproval} {result.summary.needsApproval === 1 ? 'member uses an address' : 'members use addresses'} that {result.summary.needsApproval === 1 ? 'is' : 'are'} not Gmail and can’t sign in until you approve {result.summary.needsApproval === 1 ? 'it' : 'them'}. Look for “Not Gmail · needs approval” below.
+      </p>}
+
+      {result && <section className="admin-panel admin-create-admin">
         <div className="admin-create-admin-heading">
-          <div><h2>Add an administrator</h2><p>Create a login for someone new and choose exactly which admin areas they can access.</p></div>
+          <div><h2>Add a person</h2><p>Members sign up with Gmail on their own. Add someone here to let them in with any address: the account is ready to use at once.</p></div>
+          {result.canManageRoles && <div className="ga-segmented" role="group" aria-label="Kind of account">
+            <button type="button" aria-pressed={newPersonRole === 'user'} onClick={() => setNewPersonRole('user')}>Member</button>
+            <button type="button" aria-pressed={newPersonRole === 'admin'} onClick={() => setNewPersonRole('admin')}>Administrator</button>
+          </div>}
         </div>
         <form className="admin-create-admin-form" onSubmit={(event) => void createAdministrator(event)}>
           <label className="admin-input-label">Full name
@@ -388,15 +446,19 @@ export default function AdminUsersManager() {
             <input type="password" value={newAdminPassword} onChange={(event) => setNewAdminPassword(event.target.value)} autoComplete="new-password" minLength={12} maxLength={72} required />
             <small>At least 12 characters and no more than 72 bytes. Share securely so they can sign in.</small>
           </label>
-          <fieldset className="admin-create-admin-permissions">
+          {newPersonRole === 'user' ? <fieldset className="admin-create-admin-permissions">
+            <legend>Joins as</legend>
+            <label><input type="radio" name="new-member-type" checked={newMemberType === 'reader'} onChange={() => setNewMemberType('reader')} /> <span><strong>Reader</strong><small>Reads books and quotes</small></span></label>
+            <label><input type="radio" name="new-member-type" checked={newMemberType === 'writer'} onChange={() => setNewMemberType('writer')} /> <span><strong>Writer</strong><small>Approved to submit work for review</small></span></label>
+          </fieldset> : <fieldset className="admin-create-admin-permissions">
             <legend>Choose permissions</legend>
             <label><input type="checkbox" checked={newAdminPermissions.includes('users')} onChange={() => toggleNewAdminPermission('users')} /> <span><strong>Members</strong><small>View and manage member accounts</small></span></label>
             <label><input type="checkbox" checked={newAdminPermissions.includes('payments')} onChange={() => toggleNewAdminPermission('payments')} /> <span><strong>Platform settings</strong><small>Access payment and platform settings</small></span></label>
             <label><input type="checkbox" checked={newAdminPermissions.includes('content')} onChange={() => toggleNewAdminPermission('content')} /> <span><strong>Publishing</strong><small>Review and manage submitted content</small></span></label>
-          </fieldset>
+          </fieldset>}
           {createAdminError && <p className="admin-inline-error" role="alert">{createAdminError}</p>}
           {createAdminNotice && <p className="admin-inline-success" role="status">{createAdminNotice}</p>}
-          <button className="admin-save-button" type="submit" disabled={creatingAdmin || newAdminPermissions.length === 0}>{creatingAdmin ? 'Creating…' : 'Create administrator'}</button>
+          <button className="admin-save-button" type="submit" disabled={creatingAdmin || (newPersonRole === 'admin' && newAdminPermissions.length === 0)}>{creatingAdmin ? 'Creating…' : newPersonRole === 'user' ? 'Add member' : 'Create administrator'}</button>
         </form>
       </section>}
 

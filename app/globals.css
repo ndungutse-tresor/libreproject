@@ -5281,3 +5281,22 @@ button {
     width: calc(100% - 28px);
   }
 }
+
+/* ---------- Gmail sign-up and email confirmation ---------- */
+.auth-field-hint { color: #6b6b66; font-size: 12px; font-weight: 400; line-height: 1.4; }
+.auth-notice { margin: 0 0 14px; padding: 10px 13px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; }
+.auth-notice.is-ok { background: #e7f3ec; color: #1f5b3f; }
+.auth-notice.is-warn { background: #fbf1df; color: #7a4b07; }
+.auth-resend { display: grid; gap: 4px; }
+.auth-resend p { margin: 0; color: #4b4b47; font-size: 13px; }
+.auth-link-button { justify-self: start; padding: 0; border: 0; background: none; color: #245b48; font: inherit; font-size: 13.5px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.auth-link-button:disabled { color: #8a8a84; cursor: default; text-decoration: none; }
+.auth-check-email { display: grid; gap: 10px; margin-top: 8px; }
+.auth-check-email-icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: #e7f3ec; color: #245b48; font-size: 22px; }
+.auth-check-email h2 { margin: 4px 0 0; font-size: 22px; }
+.auth-check-email p { margin: 0; color: #3f3f3b; line-height: 1.5; }
+.auth-check-email strong { overflow-wrap: anywhere; }
+.auth-check-email .auth-check-email-note { color: #6b6b66; font-size: 13px; }
+a.auth-submit { display: block; text-align: center; text-decoration: none; }
+.auth-submit.auth-submit-light { border: 1px solid #245b48; background: transparent; color: #245b48; }
+.auth-submit.auth-submit-light:disabled { cursor: default; }

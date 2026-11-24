@@ -1,5 +1,8 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
+import { cache } from 'react'
+import { getPool } from './db'
+import { CAN_SIGN_IN_SQL } from './email-access'
 
 const COOKIE_NAME = 'libra_session'
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7
@@ -34,13 +37,30 @@ export async function getSessionUserId() {
   const token = cookieStore.get(COOKIE_NAME)?.value
   if (!token) return null
 
+  let userId: string | null = null
   try {
     const { payload } = await jwtVerify(token, signingKey())
-    return typeof payload.userId === 'string' ? payload.userId : null
+    userId = typeof payload.userId === 'string' ? payload.userId : null
   } catch {
     return null
   }
+  return userId && (await mayStillSignIn(userId)) ? userId : null
 }
+
+/**
+ * A session only counts while its account may still sign in: an administrator
+ * can withdraw approval for an address that is not Gmail, and that takes effect
+ * at once. Checked once per request.
+ */
+const mayStillSignIn = cache(async (userId: string) => {
+  try {
+    const { rows } = await getPool().query(`SELECT 1 FROM profiles WHERE id = $1 AND ${CAN_SIGN_IN_SQL}`, [userId])
+    return rows.length > 0
+  } catch (error) {
+    console.error('Unable to check the session account:', error)
+    return false
+  }
+})
 
 export async function clearSession() {
   const cookieStore = await cookies()

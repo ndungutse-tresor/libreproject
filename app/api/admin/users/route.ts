@@ -45,7 +45,8 @@ export async function GET(request: Request) {
     const pool = getPool()
     const [users, count, summary] = await Promise.all([
       pool.query(
-        `SELECT id, name, email, role, perms, account_type, writer_status, reading_seconds, premium_until, created_at
+        `SELECT id, name, email, role, perms, account_type, writer_status, reading_seconds, premium_until, created_at,
+                email_verified_at, email_approved_at
          FROM profiles
          WHERE ($1 = '' OR id::text = $1 OR name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%')
          ORDER BY created_at DESC
@@ -63,7 +64,9 @@ export async function GET(request: Request) {
                 count(*) FILTER (WHERE premium_until > now())::text AS premium,
                 count(*) FILTER (WHERE role IN ('admin', 'super'))::text AS administrators,
                 count(*) FILTER (WHERE account_type = 'writer')::text AS writers,
-                count(*) FILTER (WHERE account_type = 'writer' AND writer_status = 'pending')::text AS pending_writers
+                count(*) FILTER (WHERE account_type = 'writer' AND writer_status = 'pending')::text AS pending_writers,
+                count(*) FILTER (WHERE role = 'user' AND email_approved_at IS NULL
+                                   AND lower(email) !~ '@(gmail|googlemail)\.com$')::text AS needs_approval
          FROM profiles`
       )
     ])
@@ -76,11 +79,13 @@ export async function GET(request: Request) {
         premium: Number(summary.rows[0].premium),
         administrators: Number(summary.rows[0].administrators),
         writers: Number(summary.rows[0].writers),
-        pendingWriters: Number(summary.rows[0].pending_writers)
+        pendingWriters: Number(summary.rows[0].pending_writers),
+        needsApproval: Number(summary.rows[0].needs_approval)
       },
       page,
       pageSize,
-      canManageRoles: admin.role === 'super'
+      canManageRoles: admin.role === 'super',
+      canAddMembers: true
     })
   } catch (error) {
     console.error('Unable to list admin users:', error)
@@ -93,9 +98,16 @@ export async function POST(request: Request) {
   let transactionOpen = false
   try {
     const admin = await getAdmin()
-    if (!admin || admin.role !== 'super') return NextResponse.json({ error: 'Only the super administrator can create administrator accounts.' }, { status: 403 })
+    if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const body = await request.json()
+    // Administrators with member access can add members with any address; only the
+    // super administrator can add administrators.
+    const creatingMember = body.role === 'user'
+    if (!creatingMember && admin.role !== 'super') {
+      return NextResponse.json({ error: 'Only the super administrator can create administrator accounts.' }, { status: 403 })
+    }
+    const accountType = body.accountType === 'writer' ? 'writer' : 'reader'
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
     const password = typeof body.password === 'string' ? body.password : ''
@@ -106,31 +118,36 @@ export async function POST(request: Request) {
     if (email === process.env.ADMIN_EMAIL?.trim().toLowerCase()) {
       return NextResponse.json({ error: 'This email is reserved for the super administrator account.' }, { status: 409 })
     }
-    if (!Array.isArray(body.perms) || body.perms.length < 1 ||
-        body.perms.some((permission: unknown) => typeof permission !== 'string' || !permissions.has(permission))) {
+    if (!creatingMember && (!Array.isArray(body.perms) || body.perms.length < 1 ||
+        body.perms.some((permission: unknown) => typeof permission !== 'string' || !permissions.has(permission)))) {
       return NextResponse.json({ error: 'Select at least one valid administrator permission.' }, { status: 400 })
     }
 
-    const userPermissions = body.perms.filter(
+    const userPermissions: string[] = creatingMember ? [] : body.perms.filter(
       (permission: string, index: number, values: string[]) => values.indexOf(permission) === index
     )
     const passwordHash = await bcrypt.hash(password, 12)
     client = await getPool().connect()
     await client.query('BEGIN')
     transactionOpen = true
+    // An account an administrator adds is trusted as it is: confirmed and approved, Gmail or not.
     const { rows } = await client.query(
-      `INSERT INTO profiles (name, email, password_hash, role, perms, account_type, writer_status)
-       VALUES ($1, $2, $3, 'admin', $4::text[], 'reader', 'disabled')
-       RETURNING id, name, email, role, perms, account_type, writer_status, reading_seconds, premium_until, created_at`,
-      [name, email, passwordHash, userPermissions]
+      `INSERT INTO profiles (name, email, password_hash, role, perms, account_type, writer_status, email_verified_at, email_approved_at)
+       VALUES ($1, $2, $3, $4, $5::text[], $6, $7, now(), now())
+       RETURNING id, name, email, role, perms, account_type, writer_status, reading_seconds, premium_until, created_at,
+                 email_verified_at, email_approved_at`,
+      [name, email, passwordHash, creatingMember ? 'user' : 'admin', userPermissions,
+        creatingMember ? accountType : 'reader', creatingMember && accountType === 'writer' ? 'approved' : 'disabled']
     )
     await writeAdminAudit(client, {
       actorId: String(admin.id),
-      action: 'administrator_created',
+      action: creatingMember ? 'member_created' : 'administrator_created',
       entityType: 'profile',
       entityId: String(rows[0].id),
       targetName: `${rows[0].name} (${rows[0].email})`,
-      summary: `Created an administrator account for ${rows[0].name}.`,
+      summary: creatingMember
+        ? `Added ${rows[0].name} as a ${accountType} with the address ${rows[0].email}.`
+        : `Created an administrator account for ${rows[0].name}.`,
       beforeState: null,
       afterState: {
         id: String(rows[0].id),
@@ -156,8 +173,8 @@ export async function POST(request: Request) {
     if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
       return NextResponse.json({ error: 'An account with that email already exists.' }, { status: 409 })
     }
-    console.error('Unable to create administrator account:', error)
-    return NextResponse.json({ error: 'Unable to create administrator account.' }, { status: 500 })
+    console.error('Unable to create account:', error)
+    return NextResponse.json({ error: 'Unable to create the account.' }, { status: 500 })
   } finally {
     if (transactionOpen && client) await rollbackTransaction(client, 'administrator creation')
     client?.release()
@@ -181,7 +198,7 @@ export async function PATCH(request: Request) {
     transactionOpen = true
     const { rows: targetRows } = await client.query(
       `SELECT id::text, name, email, role, perms, account_type, writer_status,
-              reading_seconds, premium_until
+              reading_seconds, premium_until, email_verified_at, email_approved_at
        FROM profiles WHERE id = $1 FOR UPDATE`,
       [body.userId]
     )
@@ -214,6 +231,18 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ error: 'Enter a valid Premium expiry date.' }, { status: 400 })
       }
       addUpdate('premium_until', body.premiumUntil, '::timestamptz')
+    }
+
+    if (body.emailAccess !== undefined) {
+      if (body.emailAccess !== 'approve' && body.emailAccess !== 'withdraw') {
+        return NextResponse.json({ error: 'Choose to approve or withdraw this address.' }, { status: 400 })
+      }
+      addUpdate('email_approved_at', body.emailAccess === 'approve' ? new Date().toISOString() : null, '::timestamptz')
+    }
+
+    if (body.emailVerified !== undefined) {
+      if (body.emailVerified !== true) return NextResponse.json({ error: 'An address can only be marked as confirmed.' }, { status: 400 })
+      addUpdate('email_verified_at', new Date().toISOString(), '::timestamptz')
     }
 
     if (body.email !== undefined) {
@@ -280,12 +309,13 @@ export async function PATCH(request: Request) {
 
     const { rows } = await client.query(
       `UPDATE profiles SET ${updates.join(', ')} WHERE id = $1
-       RETURNING id, name, email, role, perms, account_type, writer_status, reading_seconds, premium_until, created_at`,
+       RETURNING id, name, email, role, perms, account_type, writer_status, reading_seconds, premium_until, created_at,
+                 email_verified_at, email_approved_at`,
       values
     )
     const auditFields = [
       'id', 'name', 'email', 'role', 'perms', 'account_type', 'writer_status',
-      'reading_seconds', 'premium_until'
+      'reading_seconds', 'premium_until', 'email_verified_at', 'email_approved_at'
     ] as const
     const toAuditState = (profile: Record<string, unknown>) =>
       Object.fromEntries(auditFields.map((field) => [
@@ -309,7 +339,13 @@ export async function PATCH(request: Request) {
         ? `Updated ${rows[0].name}'s account${changedProfileFields.length ? ' and reset their password' : ' password'}.`
         : rows[0].role !== target.role
           ? `Changed ${rows[0].name}'s role from ${target.role} to ${rows[0].role}.`
-          : `Updated account access or details for ${rows[0].name}.`,
+          : body.emailAccess === 'approve'
+            ? `Approved ${rows[0].email} so ${rows[0].name} can sign in.`
+            : body.emailAccess === 'withdraw'
+              ? `Withdrew approval for ${rows[0].email}; ${rows[0].name} can no longer sign in.`
+              : body.emailVerified
+                ? `Marked ${rows[0].email} as confirmed for ${rows[0].name}.`
+                : `Updated account access or details for ${rows[0].name}.`,
       beforeState,
       afterState,
       canRestore: changedProfileFields.length > 0 && !promotedToSuper
